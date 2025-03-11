@@ -1,0 +1,10 @@
+data:
+  source: "yahoo_finance" # Maps to FinRL processor
+  tickers_file: "data/tickers/sp500.csv"
+  start_date: "2018-01-01"
+  time_interval: "1d"
+  technical_indicators:
+    - "macd"
+    - "rsi"
+    - "cci"
+    - "dx"

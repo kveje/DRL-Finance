@@ -1,0 +1,17 @@
+finrl
+ccxt
+gym
+yfinance
+pandas
+numpy
+matplotlib
+stable-baselines3
+torch
+exchange-calendars
+alpaca-trade-api
+stockstats
+wrds
+shimmy
+gymnasium
+torchaudio
+torchvision
