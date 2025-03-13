@@ -15,3 +15,11 @@ shimmy
 gymnasium
 torchaudio
 torchvision
+
+# Manual Data Loading
+pyyaml
+exchange_calendars
+stockstats
+scikit-learn
+yfinance
+alpaca-trade-api
