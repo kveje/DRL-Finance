@@ -3,8 +3,7 @@
 This module contains implementations of various data sources.
 """
 
-from data.sources.finrl_source import FinRLSource
-from data.sources.finrl_yahoo import FinRLYahoo
-from data.sources.finrl_alpaca import FinRLAlpaca
+from data.sources.source import BaseSource
+from data.sources.yahoo import YahooSource
 
-__all__ = ["FinRLSource", "FinRLYahoo", "FinRLAlpaca"]
+__all__ = ["Source", "YahooSource"]
