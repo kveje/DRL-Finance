@@ -1,2 +1,9 @@
 # Instructions
 CLAUDE.md
+
+*/.DS_Store
+*/__pycache__
+*/.ipynb_checkpoints
+*/.vscode
+*/.pytest
+*.pyc
