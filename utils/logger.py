@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union, Any, List
+import numpy as np
 
 # Try to import optional dependencies
 try:
