@@ -7,3 +7,9 @@ CLAUDE.md
 */.vscode
 */.pytest
 *.pyc
+*/__pycache__/
+*/.pytest_cache/
+*/.ipynb_checkpoints/
+*/.vscode/
+*/.pytest/
+*.cpython-312.pyc
