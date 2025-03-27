@@ -13,3 +13,4 @@ CLAUDE.md
 */.vscode/
 */.pytest/
 *.cpython-312.pyc
+*.csv
