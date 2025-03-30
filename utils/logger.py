@@ -11,28 +11,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union, Any, List
 import numpy as np
+import inspect
 
-# Try to import optional dependencies
-try:
-    import wandb
-
-    WANDB_AVAILABLE = True
-except ImportError:
-    WANDB_AVAILABLE = False
-
-try:
-    from torch.utils.tensorboard import SummaryWriter
-
-    TENSORBOARD_AVAILABLE = True
-except ImportError:
-    TENSORBOARD_AVAILABLE = False
-
+from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 class Logger:
     """
     Unified logger class that handles console, file, and optional
     experiment tracking (Weights & Biases and/or TensorBoard).
     """
+
+    _instance = None
+    _loggers = {}  # Dictionary to store module-specific loggers
+    _initialized = False  # Flag to track if the main logger has been initialized
+    _file_handler = None  # Shared file handler for all loggers
+    _project_root = None  # Project root directory
+    _experiment_name = None  # Shared experiment name for all loggers
 
     def __init__(
         self,
@@ -70,14 +65,23 @@ class Logger:
         self.name = name
         self.level = getattr(logging, level.upper())
 
-        if experiment_name is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.experiment_name = f"{name}_{timestamp}"
-        else:
-            self.experiment_name = experiment_name
+        # Set project root if not set
+        if Logger._project_root is None:
+            # Get the project root (assuming this file is in utils/)
+            Logger._project_root = str(Path(__file__).parent.parent)
+
+        # Set experiment name if not set
+        if Logger._experiment_name is None:
+            if experiment_name is None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                Logger._experiment_name = f"DRL_Finance_{timestamp}"
+            else:
+                Logger._experiment_name = experiment_name
+
+        self.experiment_name = Logger._experiment_name
 
         if log_dir is None:
-            self.log_dir = Path("logs") / self.experiment_name
+            self.log_dir = Path(Logger._project_root) / "logs" / self.experiment_name
         else:
             self.log_dir = Path(log_dir) / self.experiment_name
 
@@ -89,45 +93,48 @@ class Logger:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.level)
         self.logger.handlers = []  # Clear existing handlers
+        self.logger.propagate = False  # Prevent propagation to root logger
 
         # Set up formatter
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "%(asctime)s - %(caller_file)s:%(caller_line)d - %(levelname)s - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
         # Set up console handler
-        if log_to_console:
+        if log_to_console and not Logger._initialized:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
 
-        # Set up file handler
-        if log_to_file:
+        # Set up file handler only for the first logger instance
+        if log_to_file and not Logger._initialized:
             log_file = self.log_dir / f"{self.experiment_name}.log"
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
+            Logger._file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            Logger._file_handler.setFormatter(formatter)
+            Logger._file_handler.setLevel(self.level)  # Set the level for the file handler
+            Logger._initialized = True
 
-        # Initialize experiment tracking
-        self.use_wandb = log_to_wandb and WANDB_AVAILABLE
-        self.use_tensorboard = log_to_tensorboard and TENSORBOARD_AVAILABLE
+        # Add the shared file handler to this logger
+        if Logger._file_handler is not None:
+            self.logger.addHandler(Logger._file_handler)
+            # Ensure the logger's level is set correctly
+            self.logger.setLevel(self.level)
 
-        # Log the config
-        if config is not None:
-            config_file = self.log_dir / "config.json"
-            with open(config_file, "w") as f:
-                json.dump(config, f, indent=4)
-            self.info(f"Configuration saved to {config_file}")
+        # Initialize experiment tracking only for the first logger instance
+        if not Logger._initialized:
+            self.use_wandb = log_to_wandb
+            self.use_tensorboard = log_to_tensorboard
 
-        # Initialize W&B
-        if self.use_wandb:
-            if not WANDB_AVAILABLE:
-                self.warning(
-                    "Weights & Biases not available. Please install with 'pip install wandb'"
-                )
-                self.use_wandb = False
-            else:
+            # Log the config
+            if config is not None:
+                config_file = self.log_dir / "config.json"
+                with open(config_file, "w") as f:
+                    json.dump(config, f, indent=4)
+                self.info(f"Configuration saved to {config_file}")
+
+            # Initialize W&B
+            if self.use_wandb:
                 wandb.init(
                     project=wandb_project,
                     entity=wandb_entity,
@@ -138,36 +145,52 @@ class Logger:
                 )
                 self.info("Initialized Weights & Biases logging")
 
-        # Initialize TensorBoard
-        if self.use_tensorboard:
-            if not TENSORBOARD_AVAILABLE:
-                self.warning(
-                    "TensorBoard not available. Please install with 'pip install tensorboard'"
-                )
-                self.use_tensorboard = False
-            else:
+            # Initialize TensorBoard
+            if self.use_tensorboard:
                 self.tb_writer = SummaryWriter(log_dir=self.log_dir / "tensorboard")
                 self.info("Initialized TensorBoard logging")
+        else:
+            self.use_wandb = False
+            self.use_tensorboard = False
+            self.tb_writer = None
+
+    def _get_caller_info(self):
+        """Get information about the caller of the logging method."""
+        caller_frame = inspect.stack()[2]  # Skip this method and the logging method
+        # Get the absolute path and convert to relative path from project root
+        abs_path = caller_frame.filename
+        try:
+            # Try to get the relative path from the project root
+            rel_path = os.path.relpath(abs_path, Logger._project_root)
+        except ValueError:
+            # If we can't get the relative path, just use the filename
+            rel_path = os.path.basename(abs_path)
+            
+        return {
+            'caller_file': rel_path,
+            'caller_line': caller_frame.lineno,
+            'caller_func': caller_frame.function
+        }
 
     def debug(self, msg: str):
         """Log a debug message."""
-        self.logger.debug(msg)
+        self.logger.debug(msg, extra=self._get_caller_info())
 
     def info(self, msg: str):
         """Log an info message."""
-        self.logger.info(msg)
+        self.logger.info(msg, extra=self._get_caller_info())
 
     def warning(self, msg: str):
         """Log a warning message."""
-        self.logger.warning(msg)
+        self.logger.warning(msg, extra=self._get_caller_info())
 
     def error(self, msg: str):
         """Log an error message."""
-        self.logger.error(msg)
+        self.logger.error(msg, extra=self._get_caller_info())
 
     def critical(self, msg: str):
         """Log a critical message."""
-        self.logger.critical(msg)
+        self.logger.critical(msg, extra=self._get_caller_info())
 
     def log_metric(
         self, name: str, value: Union[float, int], step: Optional[int] = None
@@ -263,8 +286,15 @@ class Logger:
         """Close all log handlers and experiment tracking sessions."""
         # Close file handlers
         for handler in self.logger.handlers[:]:
-            handler.close()
-            self.logger.removeHandler(handler)
+            if handler != Logger._file_handler:  # Don't close the shared file handler
+                handler.close()
+                self.logger.removeHandler(handler)
+
+        # Close the shared file handler only if this is the last logger
+        if Logger._file_handler is not None and len(Logger._loggers) == 1:
+            Logger._file_handler.close()
+            Logger._file_handler = None
+            Logger._initialized = False
 
         # Close TensorBoard writer
         if (
@@ -278,21 +308,28 @@ class Logger:
         if self.use_wandb:
             wandb.finish()
 
-
-# Create a default logger factory function
-def get_logger(
-    name: str, level: str = "INFO", log_dir: Optional[str] = None, **kwargs
-) -> Logger:
-    """
-    Create and return a configured logger instance.
-
-    Args:
-        name: Logger name
-        level: Logging level
-        log_dir: Directory for log files
-        **kwargs: Additional arguments to pass to Logger
-
-    Returns:
-        Configured Logger instance
-    """
-    return Logger(name=name, level=level, log_dir=log_dir, **kwargs)
+    @classmethod
+    def get_logger(cls, name: Optional[str] = None, level: str = "INFO", log_dir: Optional[str] = None, **kwargs) -> 'Logger':
+        """
+        Get or create a logger instance for the specified name.
+        
+        Args:
+            name: Optional logger name. If None, uses the caller's module name
+            level: Logging level
+            log_dir: Directory for log files
+            **kwargs: Additional arguments for Logger initialization
+        """
+        # If no name provided, get the caller's module name
+        if name is None:
+            # Get the caller's module name
+            stack = inspect.stack()
+            # Skip the first frame (this function) and get the caller's frame
+            caller_frame = stack[1]
+            # Get the module name from the frame's globals
+            name = caller_frame.filename.split('\\')[-1].replace('.py', '')
+        
+        # If we don't have a logger for this name, create one
+        if name not in cls._loggers:
+            cls._loggers[name] = cls(name, level, log_dir, **kwargs)
+            
+        return cls._loggers[name]
