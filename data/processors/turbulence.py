@@ -1,12 +1,14 @@
 """Turbulence processor for financial data."""
 
-import logging
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+
 from typing import Dict, List, Optional, Union, Any
 
 import pandas as pd
 import numpy as np
-
-logger = logging.getLogger(__name__)
 
 
 class TurbulenceProcessor:

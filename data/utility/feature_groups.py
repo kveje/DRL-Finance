@@ -1,5 +1,10 @@
 """Utility function to create feature groups for normalization."""
 
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+
 from typing import Dict, List, Set, Optional
 
 from config.data import (
@@ -96,3 +101,22 @@ def print_feature_groups(feature_groups: Dict[str, List[str]]) -> None:
     # Count total features
     total_features = sum(len(cols) for cols in feature_groups.values())
     print(f"\nTotal: {total_features} features in {len(feature_groups)} groups")
+
+def log_feature_groups(feature_groups: Dict[str, List[str]]) -> None:
+    """Log feature groups in a readable format.
+
+    Args:
+        feature_groups: Dictionary mapping feature categories to lists of column names
+    """
+    logger.info("Feature Groups for Normalization:")
+    logger.info("=================================")
+
+    for group_name, columns in feature_groups.items():
+        logger.info(f"\n{group_name.upper()} ({len(columns)} features)")
+        logger.info("-" * (len(group_name) + 2 + len(str(len(columns))) + 10))
+        for col in sorted(columns):
+            logger.info(f"  - {col}")
+
+    # Count total features
+    total_features = sum(len(cols) for cols in feature_groups.values())
+    logger.info(f"\nTotal: {total_features} features in {len(feature_groups)} groups")

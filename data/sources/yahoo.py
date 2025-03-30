@@ -1,6 +1,10 @@
 """Yahoo Finance data source implementation."""
 
-import logging
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
@@ -8,8 +12,6 @@ import pandas as pd
 import yfinance as yf
 
 from data.sources.source import BaseSource
-
-logger = logging.getLogger(__name__)
 
 
 class YahooSource(BaseSource):
