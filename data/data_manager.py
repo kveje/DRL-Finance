@@ -4,7 +4,6 @@ This module provides a central data management system that handles downloading,
 processing, and preparing financial data for reinforcement learning.
 """
 
-import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
@@ -24,8 +23,10 @@ from data.utility.feature_groups import create_feature_groups
 from data.processors.normalization import NormalizeProcessor
 
 from config.data import NORMALIZATION_PARAMS
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
 
-logger = logging.getLogger(__name__)
 
 
 class DataManager:
@@ -168,8 +169,8 @@ class DataManager:
     def process_data(
         self,
         data: pd.DataFrame,
-        processors: List[str] = None,
-        processor_params: Dict[str, Dict[str, Any]] = None,
+        processors: Optional[List[str]] = None,
+        processor_params: Optional[Dict[str, Dict[str, Any]]] = None,
         save_cache: bool = True,
     ) -> pd.DataFrame:
         """Process data using specified processors.
@@ -262,10 +263,6 @@ class DataManager:
                     col for col in columns if col not in exclude_columns
                 ]
 
-        # Log the feature groups
-        for group, columns in feature_groups.items():
-            logger.info(f"Normalizing {group} features: {columns}")
-
         # Create a normalizer with the specified method
         normalizer = NormalizeProcessor(method=method)
 
@@ -277,7 +274,7 @@ class DataManager:
             if not columns:  # Skip empty groups
                 continue
 
-            logger.info(f"Applying {method} normalization to {group_name} features")
+            logger.info(f"Applying {method} normalization to {group_name} features: {columns}")
             result = normalizer.process(data=result, columns=columns, group_by=group_by)
 
         # Generate cache path if requested
