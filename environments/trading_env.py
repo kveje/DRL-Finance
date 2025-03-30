@@ -2,11 +2,17 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from gym import spaces
-from .base_env import BaseTradingEnv
-from .rewards import returns_based, sharpe_based, risk_adjusted
-from .market_friction import slippage, commission, market_impact
-from .constraints import position_limits, risk_limits, regulatory_limits
+import random
 
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+# Import internal dependencies
+from .base_env import BaseTradingEnv
+from .rewards import RewardManager
+from .market_friction import MarketFrictionManager
+from .constraints import ConstraintManager
 
 class TradingEnv(BaseTradingEnv):
     """
@@ -17,129 +23,111 @@ class TradingEnv(BaseTradingEnv):
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        processed_data: pd.DataFrame,
         raw_data: pd.DataFrame,
-        initial_balance: float = 100000.0,
-        transaction_fee_percent: float = 0.001,
-        slippage_model: str = "constant",
-        reward_type: str = "returns",
-        position_limits: Optional[Dict[str, float]] = None,
-        risk_limits: Optional[Dict[str, float]] = None,
-        window_size: int = 10,
+        columns: Dict[str, Union[str, List[str]]], # {ticker: "ticker", price: "close", day: "day", ohlcv: ["open", "high", "low", "close", "volume"], technical_columns: ["RSI", "MACD", "Bollinger Bands"]}
+        env_params: Dict[str, Any] = {}, # {initial_balance: 100000.0, window_size: 10}
+        friction_params: Dict[str, Dict[str, float]] = {}, # {slippage: {slippage_mean: 0.0, slippage_std: 0.001}, commission: {commission_rate: 0.001}}
+        reward_params: Tuple[str, Dict[str, Any]] = ("returns_based", {"scale": 1.0}), # (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
+        constraint_params: Dict[str, Dict[str, float]] = {}, # {position_limits: {min: -1000, max: 1000}}
         seed: Optional[int] = None,
     ):
         """
         Initialize the trading environment.
 
         Args:
-            data: DataFrame with normalized OHLCV data and technical indicators
+            processed_data: DataFrame with normalized OHLCV data and technical indicators 
             raw_data: DataFrame with raw OHLCV data for actual trading calculations
-            initial_balance: Starting capital
-            transaction_fee_percent: Transaction fee as percentage
-            slippage_model: Type of slippage model to use
-            reward_type: Type of reward function to use
-            position_limits: Dictionary of position limits per asset
-            risk_limits: Dictionary of risk limits (e.g., max drawdown)
-            window_size: Number of time steps to include in observation
+            env_params: Dictionary of environment parameters (initial_balance, window_size, etc.)
+            friction_params: Dictionary of friction parameters (slippage, commission, etc.)
+            reward_params: Tuple of (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
+            constraint_params: Dictionary of constraint parameters (position_limits, etc.)
             seed: Random seed for reproducibility
         """
         super().__init__()
+        
+        logger.info(f"Initializing TradingEnv")
 
         # Data setup
-        self.data = data
-        self.raw_data = raw_data
-        self.n_assets = len(data.columns) // 5  # Assuming OHLCV format
-        self.window_size = window_size
+        self.processed_data: pd.DataFrame = processed_data
+        self.raw_data: pd.DataFrame = raw_data
 
-        # Identify feature columns (excluding OHLCV and metadata)
-        self.feature_columns = [
-            col
-            for col in data.columns
-            if col not in ["Open", "High", "Low", "Close", "Volume", "date", "ticker"]
-        ]
+        # Data columns setup
+        self.tic_col: str = columns["ticker"]
+        self.price_col: str = columns["price"]
+        self.day_col: str = columns["day"]
+        self.ohlcv_cols: List[str] = columns["ohlcv"]
+        self.tech_cols: List[str] = columns["tech_cols"]
 
-        # Separate price and technical indicator columns
-        self.price_columns = ["Open", "High", "Low", "Close", "Volume"]
-        self.technical_columns = self.feature_columns
+        # Asset setup
+        self.asset_list: List[str] = list(processed_data[self.tic_col].unique()) # List of asset tickers
+        self.n_assets = len(self.asset_list)
 
-        # Trading parameters
-        self.initial_balance = initial_balance
-        self.current_balance = initial_balance
-        self.positions = np.zeros(self.n_assets)
-        self.transaction_fee_percent = transaction_fee_percent
+        # Environment parameters
+        self.env_params = env_params
+        self.initial_balance: float = env_params.get("initial_balance", 100000.0) # Defaults to 100,000
+        self.window_size: int = env_params.get("window_size", 10) # Defaults to 10
+        
+        # Portfolio tracking
+        self.current_cash = self.initial_balance
+        self.positions = np.zeros(self.n_assets)  # Number of shares for each asset
+        self.asset_values = np.zeros(self.n_assets)  # Value of each asset position
+        self.portfolio_value_history = [self.initial_balance]
 
-        # Define action space (percentage of portfolio to allocate to each asset)
+        # Initialize managers for market frictions, constraints, and rewards
+        self.market_frictions = MarketFrictionManager(friction_params)
+        self.constraint_manager = ConstraintManager(constraint_params)
+        self.reward_manager = RewardManager(reward_params)
+
+        # Define action space (Action is the number of shares to buy or sell for each asset)
+        # Actions represent the change in the number of shares to hold
         self.action_space = spaces.Box(
-            low=-1,  # Short positions
-            high=1,  # Long positions
+            low=-np.inf,  # Selling (negative values)
+            high=np.inf,  # Buying (positive values)
             shape=(self.n_assets,),
-            dtype=np.float32,
+            dtype=np.int32,
         )
 
         # Define observation space
-        # [Normalized OHLCV data for window_size steps] + [technical indicators] + [current positions] + [current balance]
-        obs_shape = (
-            self.window_size * 5 * self.n_assets  # Normalized OHLCV data
-            + len(self.technical_columns) * self.n_assets  # Technical indicators
-            + self.n_assets  # Current positions
-            + 1  # Current balance
-        )
+        # [Normalized OHLCV data for window_size steps] + [technical indicators] + [current positions] + [current cash] + [portfolio value]
+        ohlcv_dim = 5 * self.n_assets 
+        tech_dim = len(self.tech_cols) * self.n_assets
+        position_dim = self.n_assets
+        cash_dim = 1
+        portfolio_dim = 1
+        
+        # Observation shape
+        obs_shape = (ohlcv_dim + tech_dim + position_dim + cash_dim + portfolio_dim, self.window_size)
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=obs_shape, dtype=np.float32
         )
-
-        # Initialize components
-        self._init_reward_function(reward_type)
-        self._init_market_friction(slippage_model)
-        self._init_constraints(position_limits, risk_limits)
-
-        # Set random seed
-        self.seed(seed)
 
         # Initialize state
         self.current_step = self.window_size
         self.done = False
         self.info = {}
 
-    def _init_reward_function(self, reward_type: str) -> None:
-        """Initialize the reward function based on type."""
-        reward_functions = {
-            "returns": returns_based.ReturnsBasedReward(),
-            "sharpe": sharpe_based.SharpeBasedReward(),
-            "risk_adjusted": risk_adjusted.RiskAdjustedReward(),
-        }
-        self.reward_function = reward_functions.get(reward_type)
-        if not self.reward_function:
-            raise ValueError(f"Unknown reward type: {reward_type}")
+        # Log information about the environment
+        self._log_env_start()
 
-    def _init_market_friction(self, slippage_model: str) -> None:
-        """Initialize market friction components."""
-        self.slippage = slippage.SlippageModel(model_type=slippage_model)
-        self.commission = commission.CommissionModel(
-            fee_percent=self.transaction_fee_percent
-        )
-        self.market_impact = market_impact.MarketImpactModel()
-
-    def _init_constraints(
-        self,
-        position_limits: Optional[Dict[str, float]],
-        risk_limits: Optional[Dict[str, float]],
-    ) -> None:
-        """Initialize trading constraints."""
-        self.position_constraints = position_limits.PositionLimits(
-            limits=position_limits or {}
-        )
-        self.risk_constraints = risk_limits.RiskLimits(limits=risk_limits or {})
-        self.regulatory_constraints = regulatory_limits.RegulatoryLimits()
+        # Set random seed
+        self.seed = self._set_seed(seed)
 
     def reset(self) -> np.ndarray:
         """Reset the environment to initial state."""
         self.current_step = self.window_size
-        self.current_balance = self.initial_balance
+        self.current_cash = self.initial_balance
         self.positions = np.zeros(self.n_assets)
+        self.asset_values = np.zeros(self.n_assets)
+        self.portfolio_value_history = [self.initial_balance]
         self.done = False
         self.info = {}
-        return self._get_observation()
+        self.reward_manager.reset()
+        
+        # Get observation
+        observation = self._get_observation()
+        
+        return observation
 
     def step(
         self, action: np.ndarray
@@ -148,156 +136,201 @@ class TradingEnv(BaseTradingEnv):
         Execute one step in the environment.
 
         Args:
-            action: Array of portfolio weights for each asset
+            action: Array of trading actions (positive for buy, negative for sell, in number of shares)
 
         Returns:
             Tuple of (observation, reward, done, info)
         """
-        # Get current market data
-        current_data = self._get_current_data()
-
-        # Apply market frictions
-        action = self._apply_market_frictions(action, current_data[0])
-
+        # Get current prices
+        current_prices = self._get_current_prices()
+        
+        # Store previous portfolio state
+        previous_portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        
+        # Apply market frictions (slippage, etc.)
+        adjusted_prices = self.market_frictions.apply_frictions(action, current_prices)
+        
         # Check constraints
-        if not self._check_constraints(action):
+        if not self.constraint_manager.check_constraints(action, self.positions, self.current_cash, adjusted_prices):
             self.done = True
-            return self._get_observation(), -1000.0, True, self.info
-
+            return self._get_observation(), -1000.0, True, {"termination_reason": "constraint_violation"}
+        
         # Execute trades
-        self._execute_trades(action, current_data)
-
-        # Update state
+        self._execute_trades(action, adjusted_prices)
+        
+        # Move to next step
         self.current_step += 1
-        self.done = self._is_done()
-
+        
+        # Update portfolio value history
+        new_portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        self.portfolio_value_history.append(new_portfolio_value)
+        
         # Calculate reward
-        reward = self._calculate_reward(action)
-
-        # Update info
-        self.info = self._update_info()
-
+        reward = self.reward_manager.calculate(
+            portfolio_value=new_portfolio_value,
+            previous_portfolio_value=previous_portfolio_value,
+        )
+        
+        # Update state for next step
+        self.previous_prices = current_prices
+        
+        # Check if episode is done
+        self.done = self._is_done()
+        
+        # Update info dictionary
+        self.info = self._update_info(previous_portfolio_value, new_portfolio_value)
+        
         return self._get_observation(), reward, self.done, self.info
 
-    def _get_current_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Get the current window of market data (both normalized and raw)."""
-        normalized_data = self.data.iloc[
-            self.current_step - self.window_size : self.current_step
-        ]
-        raw_data = self.raw_data.iloc[
-            self.current_step - self.window_size : self.current_step
-        ]
-        return normalized_data, raw_data
+    def _get_current_prices(self) -> np.ndarray:
+        """Get current close prices for all assets."""
+        prices = np.array([
+            self.raw_data[self.price_col].iloc[self.current_step]
+            for asset in self.asset_list
+        ], dtype=np.float32)
+        return prices
+    
+    def _get_ohlcv_window(self) -> np.ndarray:
+        """Get the window of OHLCV data for all assets."""
+        ohlcv_data = []
+        
+        for asset in self.asset_list:
+            for field in self.ohlcv_cols:
+                col_name = field
+                asset_data = self.processed_data[self.tic_col] == asset
+                data = self.processed_data[col_name].loc[asset_data].iloc[self.current_step - self.window_size:self.current_step].values
+                ohlcv_data.append(data)
+                
+        return np.concatenate(ohlcv_data)
 
-    def _apply_market_frictions(
-        self, action: np.ndarray, current_data: pd.DataFrame
-    ) -> np.ndarray:
-        """Apply market frictions to the action."""
-        # Apply slippage
-        action = self.slippage.apply(action, current_data)
-
-        # Apply commission
-        action = self.commission.apply(action, self.current_balance)
-
-        # Apply market impact
-        action = self.market_impact.apply(action, current_data)
-
-        return action
-
-    def _check_constraints(self, action: np.ndarray) -> bool:
-        """Check if the action satisfies all constraints."""
-        # Check position limits
-        if not self.position_constraints.check(action):
-            return False
-
-        # Check risk limits
-        if not self.risk_constraints.check(action, self.positions):
-            return False
-
-        # Check regulatory constraints
-        if not self.regulatory_constraints.check(action):
-            return False
-
-        return True
-
-    def _execute_trades(
-        self, action: np.ndarray, current_data: Tuple[pd.DataFrame, pd.DataFrame]
-    ) -> None:
-        """Execute trades based on the action."""
-        _, raw_data = current_data
-
-        # Calculate target positions
-        target_positions = action * self.current_balance
-
+    def _execute_trades(self, action: np.ndarray, prices: np.ndarray) -> None:
+        """
+        Execute trades based on the action.
+        
+        Args:
+            action: Array of changes in positions (positive for buy, negative for sell)
+            prices: Current asset prices
+        """
         # Update positions
-        self.positions = target_positions
+        self.positions += action
+        # Update cash
+        self.current_cash -= np.sum(action * prices)
 
-        # Update balance using raw price data
-        price_changes = raw_data[self.price_columns].iloc[-1].pct_change()
-        self.current_balance *= 1 + np.sum(action * price_changes)
+        # Update asset values
+        self.asset_values = self.positions * prices
+
+        # Update portfolio value
+        self.portfolio_value = self.current_cash + np.sum(self.positions * prices)
+
+        # Update portfolio value history
+        self.portfolio_value_history.append(self.portfolio_value)
+
+    def _calculate_portfolio_value(self, positions: np.ndarray, prices: np.ndarray) -> float:
+        """Calculate the total portfolio value."""
+        return self.current_cash + np.sum(positions * prices)
 
     def _get_observation(self) -> np.ndarray:
         """Get the current observation."""
-        # Get current window of market data
-        normalized_data, _ = self._get_current_data()
-
-        # Extract normalized OHLCV data for observations
-        ohlcv_data = normalized_data[self.price_columns].values.flatten()
-
-        # Extract technical indicators (already normalized)
-        technical_indicators = (
-            normalized_data[self.technical_columns].iloc[-1].values.flatten()
-        )
-
-        # Combine all components
-        observation = np.concatenate(
-            [
-                ohlcv_data,  # Normalized price data for observations
-                technical_indicators,  # Normalized technical indicators
-                self.positions,
-                np.array([self.current_balance]),
-            ]
-        )
-
+        # Get OHLCV data window
+        ohlcv_data = self._get_ohlcv_window()
+        
+        # Get technical indicators (last row for current step)
+        technical_data = self.processed_data[self.tech_cols].iloc[self.current_step].values
+        
+        # Get current prices
+        current_prices = self._get_current_prices()
+        
+        # Calculate current portfolio value
+        portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        
+        # Update asset values
+        self.asset_values = self.positions * current_prices
+        
+        # Combine all components into observation
+        observation = np.concatenate([
+            ohlcv_data,                 # Historical OHLCV data
+            technical_data,             # Technical indicators
+            self.positions,             # Current positions in shares
+            np.array([self.current_cash]), # Current cash
+            np.array([portfolio_value])   # Total portfolio value
+        ])
+        
         return observation
-
-    def _calculate_reward(self, action: np.ndarray) -> float:
-        """Calculate the reward for the action."""
-        return self.reward_function.calculate(
-            action=action,
-            positions=self.positions,
-            current_balance=self.current_balance,
-            market_data=self._get_current_data(),
-        )
 
     def _is_done(self) -> bool:
         """Check if the episode is done."""
-        return self.current_step >= len(self.data) - 1
+        # Episode ends when we reach the end of the data
+        if self.current_step >= len(self.processed_data) - 1:
+            return True
+            
+        # Episode can also end if portfolio value drops below a threshold
+        current_prices = self._get_current_prices()
+        portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        
+        # bankruptcy_threshold = np.inf # TODO: Add bankruptcy threshold ?
+        # if portfolio_value < self.initial_balance * bankruptcy_threshold:
+        #     logger.info(f"Bankruptcy: Portfolio value {portfolio_value} below threshold {self.initial_balance * bankruptcy_threshold}")
+        #     return True
+            
+        return False
 
-    def _update_info(self) -> Dict[str, Any]:
+    def _update_info(self, previous_value: float, current_value: float) -> Dict[str, Any]:
         """Update the info dictionary with current state."""
+        # Calculate period return
+        period_return = (current_value - previous_value) / previous_value if previous_value > 0 else 0
+        
+        # Calculate cumulative return
+        cumulative_return = (current_value - self.initial_balance) / self.initial_balance
+        
         return {
-            "balance": self.current_balance,
-            "positions": self.positions,
             "step": self.current_step,
-            "returns": (self.current_balance - self.initial_balance)
-            / self.initial_balance,
+            "portfolio_value": current_value,
+            "cash": self.current_cash,
+            "positions": self.positions,
+            "asset_values": self.asset_values,
+            "period_return": period_return,
+            "cumulative_return": cumulative_return,
         }
 
     def render(self, mode: str = "human") -> None:
         """Render the environment."""
         if mode == "human":
+            current_prices = self._get_current_prices()
+            portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+            
             print(f"Step: {self.current_step}")
-            print(f"Balance: ${self.current_balance:.2f}")
-            print(f"Positions: {self.positions}")
-            print(f"Returns: {self.info['returns']:.2%}")
+            print(f"Portfolio Value: ${portfolio_value:.2f}")
+            print(f"Cash: ${self.current_cash:.2f}")
+            print(f"Assets:")
+            for i, asset in enumerate(self.asset_list):
+                print(f"  {asset}: {self.positions[i]:.4f} shares @ ${current_prices[i]:.2f} = ${self.asset_values[i]:.2f}")
+            print(f"Returns: {self.info.get('cumulative_return', 0):.2%}")
+        else:
+            raise NotImplementedError(f"Render mode {mode} not implemented")
 
     def close(self) -> None:
         """Clean up resources."""
-        pass
+        self.reset()
 
-    def seed(self, seed: Optional[int] = None) -> list:
+    def _set_seed(self, seed: Optional[int] = None) -> list:
         """Set the random seed."""
         if seed is not None:
+            logger.info(f"Setting random seed to {seed}")
             np.random.seed(seed)
-        return [seed]
+            random.seed(seed)
+            return seed
+        else:
+            random_seed = np.random.randint(0, 1000000)
+            np.random.seed(random_seed)
+            random.seed(random_seed)
+            logger.info(f"Random seed set to {random_seed}")
+            return random_seed
+        
+    def _log_env_start(self) -> None:
+        """Log information about the environment at initialization."""
+        logger.info(f"Environment initialized with {self.n_assets} assets")
+        logger.info(f"Initial balance: ${self.initial_balance:.2f}")
+        logger.info(f"Window size: {self.window_size}")
+        logger.info(f"Data length: {len(self.processed_data)}")
+        logger.info(f"Number of stocks: {len(self.asset_list)}")
+        logger.info(f"Action space: {self.action_space}")

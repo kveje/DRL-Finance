@@ -73,7 +73,7 @@ class BaseTradingEnv(gym.Env, ABC):
         pass
 
     @abstractmethod
-    def seed(self, seed: Optional[int] = None) -> list:
+    def _set_seed(self, seed: Optional[int] = None) -> list:
         """
         Set the seed for this environment's random number generator(s).
 
