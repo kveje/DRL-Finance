@@ -23,3 +23,6 @@ stockstats
 scikit-learn
 yfinance
 alpaca-trade-api
+wandb
+tensorboard
+torch-tb-profiler
