@@ -5,6 +5,19 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Initialize the logger
+from utils.logger import Logger
+# Initialize the logger once at the start of your application
+logger = Logger(
+    name="REDUNANDANT",
+    level="INFO",
+    log_dir="logs",
+    log_to_file=True,
+    log_to_console=False,
+    experiment_name="test_trading_env",
+    # Add other configuration as needed
+)
+
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -17,6 +30,7 @@ from config.data import (
     PROCESSOR_PARAMS,
     NORMALIZATION_PARAMS,
 )
+from config.env import ENV_PARAMS, MARKET_FRIC_PARAMS, CONSTRAINT_PARAMS, REWARD_PARAMS
 
 
 def main():
@@ -66,11 +80,12 @@ def main():
     # Create environment
     print("\nCreating trading environment...")
     env = TradingEnv(
-        data=normalized_data,
+        processed_data=normalized_data,
         raw_data=raw_data,
-        initial_balance=100000.0,
-        transaction_fee_percent=0.001,
-        window_size=10,
+        env_params=ENV_PARAMS,
+        friction_params=MARKET_FRIC_PARAMS,
+        constraint_params=CONSTRAINT_PARAMS,
+        reward_params=REWARD_PARAMS,
         seed=42,
     )
 
