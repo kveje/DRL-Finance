@@ -1,7 +1,4 @@
-import pandas as pd
-
-from data import DataManager
-
+# Import config
 from config.data import (
     TRAIN_START_DATE,
     TRAIN_END_DATE,
@@ -18,6 +15,14 @@ from config.path import (
     RESULTS_PATH,
     CACHE_PATH,
 )
+
+# Initialize the logger
+from utils.logger import get_logger, Logger
+logger: Logger = get_logger(name="data_test", level="DEBUG", log_dir=LOG_PATH, log_to_file=True)
+
+# Import submodules
+from data import DataManager
+
 
 # Initialize the DataManager
 data_manager = DataManager(
@@ -40,4 +45,3 @@ data = data_manager.prepare_data(
     force_download=False,
 )
 
-print(data.tail())
