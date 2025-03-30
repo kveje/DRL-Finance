@@ -6,33 +6,34 @@ from .base_reward import BaseReward
 class ReturnsBasedReward(BaseReward):
     """Reward function based on portfolio returns."""
 
-    def __init__(self, transaction_cost_penalty: float = 0.1):
+    def __init__(self, config: Dict[str, Any]):
         """
         Initialize the returns-based reward function.
-
+        
         Args:
-            transaction_cost_penalty: Penalty factor for transaction costs
+            config: Configuration dictionary containing reward parameters.
+                parameters:
+                    scale: Scale factor for the reward
+                
+                Example:
+                {"scale": 1.0}
         """
-        self.transaction_cost_penalty = transaction_cost_penalty
-        self.previous_positions = None
+        super().__init__(name="returns_based")
+        self.scale = config.get("scale", 1.0)
 
     def calculate(
         self,
         portfolio_value: float,
         previous_portfolio_value: float,
-        positions: np.ndarray,
-        price_changes: np.ndarray,
-        info: Dict[str, Any],
+        **kwargs
     ) -> float:
         """
-        Calculate reward based on portfolio returns and transaction costs.
+        Calculate reward based on portfolio returns.
 
         Args:
             portfolio_value: Current portfolio value
             previous_portfolio_value: Portfolio value from previous step
-            positions: Current positions in each asset
-            price_changes: Price changes for each asset
-            info: Additional information about the environment state
+            **kwargs: Additional arguments
 
         Returns:
             float: The calculated reward
@@ -42,14 +43,17 @@ class ReturnsBasedReward(BaseReward):
             portfolio_value - previous_portfolio_value
         ) / previous_portfolio_value
 
-        # Calculate transaction cost penalty
-        transaction_cost = 0.0
-        if self.previous_positions is not None:
-            position_changes = np.abs(positions - self.previous_positions)
-            transaction_cost = np.sum(position_changes) * self.transaction_cost_penalty
+        return portfolio_return * self.scale # Scale the reward
 
-        # Update previous positions
-        self.previous_positions = positions.copy()
+    def __str__(self) -> str:
+        """Return a string representation of the reward function."""
+        return f"ReturnsBasedReward()"
 
-        # Final reward is return minus transaction cost penalty
-        return portfolio_return - transaction_cost
+    def __repr__(self) -> str:
+        """Return a string representation of the reward function."""
+        return self.__str__()
+
+    def reset(self):
+        """Reset the reward function."""
+        pass
+
