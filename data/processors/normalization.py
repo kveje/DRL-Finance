@@ -1,6 +1,10 @@
 """Data normalization module for financial data."""
 
-import logging
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -8,8 +12,6 @@ import pandas as pd
 
 from data.processors.processor import BaseProcessor
 from config.data import NORMALIZATION_PARAMS
-
-logger = logging.getLogger(__name__)
 
 
 class NormalizeProcessor(BaseProcessor):
@@ -126,7 +128,6 @@ class NormalizeProcessor(BaseProcessor):
         Returns:
             Normalized DataFrame.
         """
-        logger.info(f"Applying z-score normalization to columns: {columns}")
 
         # First, convert all columns to normalize to float dtype
         result = data.copy()
@@ -196,9 +197,6 @@ class NormalizeProcessor(BaseProcessor):
         Returns:
             Normalized DataFrame.
         """
-        logger.info(
-            f"Applying rolling window normalization (window={window}) to columns: {columns}"
-        )
         result = data.copy()
 
         if group_by:
@@ -266,7 +264,6 @@ class NormalizeProcessor(BaseProcessor):
         Returns:
             Normalized DataFrame.
         """
-        logger.info(f"Applying percentage change normalization to columns: {columns}")
         result = data.copy()
 
         if group_by:

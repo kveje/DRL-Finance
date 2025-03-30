@@ -1,3 +1,8 @@
+# Initialize the logger
+from utils.logger import Logger
+logger = Logger.get_logger()
+
+
 import pandas as pd
 
 from data.sources.source import BaseSource
