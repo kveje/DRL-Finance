@@ -25,7 +25,7 @@ class TradingEnv(BaseTradingEnv):
         self,
         processed_data: pd.DataFrame,
         raw_data: pd.DataFrame,
-        columns: Dict[str, Union[str, List[str]]], # {ticker: "ticker", price: "close", day: "day", ohlcv: ["open", "high", "low", "close", "volume"], technical_columns: ["RSI", "MACD", "Bollinger Bands"]}
+        columns: Dict[str, Union[str, List[str]]], # {ticker: "ticker", price: "close", day: "day", ohlcv: ["open", "high", "low", "close", "volume"], tech_cols: ["RSI", "MACD", "Bollinger Bands"]}
         env_params: Dict[str, Any] = {}, # {initial_balance: 100000.0, window_size: 10}
         friction_params: Dict[str, Dict[str, float]] = {}, # {slippage: {slippage_mean: 0.0, slippage_std: 0.001}, commission: {commission_rate: 0.001}}
         reward_params: Tuple[str, Dict[str, Any]] = ("returns_based", {"scale": 1.0}), # (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
@@ -58,6 +58,7 @@ class TradingEnv(BaseTradingEnv):
         self.day_col: str = columns["day"]
         self.ohlcv_cols: List[str] = columns["ohlcv"]
         self.tech_cols: List[str] = columns["tech_cols"]
+        self.market_cols: List[str] = self.ohlcv_cols + self.tech_cols
 
         # Asset setup
         self.asset_list: List[str] = list(processed_data[self.tic_col].unique()) # List of asset tickers
@@ -90,17 +91,29 @@ class TradingEnv(BaseTradingEnv):
 
         # Define observation space
         # [Normalized OHLCV data for window_size steps] + [technical indicators] + [current positions] + [current cash] + [portfolio value]
-        ohlcv_dim = 5 * self.n_assets 
-        tech_dim = len(self.tech_cols) * self.n_assets
-        position_dim = self.n_assets
-        cash_dim = 1
-        portfolio_dim = 1
+        self.ohlcv_dim = 5
+        self.tech_dim = len(self.tech_cols)
+        self.cash_dim = 1
+        self.portfolio_value_dim = 1
         
         # Observation shape
-        obs_shape = (ohlcv_dim + tech_dim + position_dim + cash_dim + portfolio_dim, self.window_size)
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=obs_shape, dtype=np.float32
-        )
+        self.observation_space = spaces.Dict({
+            'data': spaces.Box(
+                low=-np.inf, high=np.inf, 
+                shape=(self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size), 
+                dtype=np.float32
+            ),
+            'positions': spaces.Box(
+                low=-np.inf, high=np.inf, 
+                shape=(self.n_assets,), 
+                dtype=np.float32
+            ),
+            'portfolio_info': spaces.Box(
+                low=-np.inf, high=np.inf, 
+                shape=(2,),
+                dtype=np.float32
+            )
+        })
 
         # Initialize state
         self.current_step = self.window_size
@@ -145,7 +158,9 @@ class TradingEnv(BaseTradingEnv):
         current_prices = self._get_current_prices()
         
         # Store previous portfolio state
+        # Might just get this from portfolio_value_history
         previous_portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        previous_portfolio_value = self.portfolio_value_history[-1]
         
         # Apply market frictions (slippage, etc.)
         adjusted_prices = self.market_frictions.apply_frictions(action, current_prices)
@@ -153,7 +168,8 @@ class TradingEnv(BaseTradingEnv):
         # Check constraints
         if not self.constraint_manager.check_constraints(action, self.positions, self.current_cash, adjusted_prices):
             self.done = True
-            return self._get_observation(), -1000.0, True, {"termination_reason": "constraint_violation"}
+            self.info = self._update_info(previous_portfolio_value, previous_portfolio_value, "constraint_violation")
+            return self._get_observation(), -1000.0, True, self.info
         
         # Execute trades
         self._execute_trades(action, adjusted_prices)
@@ -190,18 +206,26 @@ class TradingEnv(BaseTradingEnv):
         ], dtype=np.float32)
         return prices
     
-    def _get_ohlcv_window(self) -> np.ndarray:
-        """Get the window of OHLCV data for all assets."""
-        ohlcv_data = []
+    def _get_market_data(self, asset: Optional[str] = None) -> np.ndarray:
+        """Get the window of market data for one or all assets.
+        Market data includes OHLCV data and technical indicators.
         
-        for asset in self.asset_list:
-            for field in self.ohlcv_cols:
-                col_name = field
-                asset_data = self.processed_data[self.tic_col] == asset
-                data = self.processed_data[col_name].loc[asset_data].iloc[self.current_step - self.window_size:self.current_step].values
-                ohlcv_data.append(data)
-                
-        return np.concatenate(ohlcv_data)
+        Returns:
+            np.ndarray: Market data for the window of data
+            Asset Shape: (window_size, 5 + tech_dim)
+            All Assets Shape: (n_assets, 5 + tech_dim, window_size)
+        """ 
+        if asset and asset in self.asset_list:
+            market_data = self.processed_data[self.processed_data[self.tic_col] == asset].iloc[self.current_step - self.window_size:self.current_step][self.market_cols].values
+            return np.array(market_data, dtype=np.float32).transpose()
+        elif asset is None:
+            market_data = np.zeros((self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
+            for i, asset in enumerate(self.asset_list):
+                temp = self.processed_data[self.processed_data[self.tic_col] == asset].iloc[self.current_step - self.window_size:self.current_step][self.market_cols].values
+                market_data[i, :, :] = np.array(temp, dtype=np.float32).transpose()
+            return market_data
+        else:
+            raise ValueError(f"Asset {asset} not found in asset list")
 
     def _execute_trades(self, action: np.ndarray, prices: np.ndarray) -> None:
         """
@@ -230,32 +254,30 @@ class TradingEnv(BaseTradingEnv):
         return self.current_cash + np.sum(positions * prices)
 
     def _get_observation(self) -> np.ndarray:
-        """Get the current observation."""
-        # Get OHLCV data window
-        ohlcv_data = self._get_ohlcv_window()
+        """Get the current observation.
         
-        # Get technical indicators (last row for current step)
-        technical_data = self.processed_data[self.tech_cols].iloc[self.current_step].values
+        Returns:
+            np.ndarray: Observation for all assets
+            Shape: (n_assets, ohlcv_dim + tech_dim + cash_dim + portfolio_value_dim, window_size)
+            dtype: np.float32
+        """
         
-        # Get current prices
+        # Get current prices and portfolio value
         current_prices = self._get_current_prices()
-        
-        # Calculate current portfolio value
         portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
-        
-        # Update asset values
-        self.asset_values = self.positions * current_prices
-        
-        # Combine all components into observation
-        observation = np.concatenate([
-            ohlcv_data,                 # Historical OHLCV data
-            technical_data,             # Technical indicators
-            self.positions,             # Current positions in shares
-            np.array([self.current_cash]), # Current cash
-            np.array([portfolio_value])   # Total portfolio value
-        ])
-        
-        return observation
+
+        # Get Market Data
+        market_data = self._get_market_data()
+
+        for i, asset in enumerate(self.asset_list):
+            asset_market_data = self._get_market_data(asset)
+            
+
+        return {
+            'data': market_data,
+            'positions': self.positions,
+            'portfolio_info': np.array([self.current_cash, portfolio_value])
+        }
 
     def _is_done(self) -> bool:
         """Check if the episode is done."""
@@ -264,8 +286,8 @@ class TradingEnv(BaseTradingEnv):
             return True
             
         # Episode can also end if portfolio value drops below a threshold
-        current_prices = self._get_current_prices()
-        portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
+        # current_prices = self._get_current_prices()
+        # portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
         
         # bankruptcy_threshold = np.inf # TODO: Add bankruptcy threshold ?
         # if portfolio_value < self.initial_balance * bankruptcy_threshold:
@@ -274,7 +296,7 @@ class TradingEnv(BaseTradingEnv):
             
         return False
 
-    def _update_info(self, previous_value: float, current_value: float) -> Dict[str, Any]:
+    def _update_info(self, previous_value: float, current_value: float, termination_reason: Optional[str] = "") -> Dict[str, Any]:
         """Update the info dictionary with current state."""
         # Calculate period return
         period_return = (current_value - previous_value) / previous_value if previous_value > 0 else 0
@@ -290,6 +312,7 @@ class TradingEnv(BaseTradingEnv):
             "asset_values": self.asset_values,
             "period_return": period_return,
             "cumulative_return": cumulative_return,
+            "termination_reason": termination_reason,
         }
 
     def render(self, mode: str = "human") -> None:

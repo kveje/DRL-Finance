@@ -22,9 +22,6 @@ CONSTRAINT_PARAMS = {
         'min': -1000,
         'max': 1000
     },
-    'risk_limits': {
-        'max_drawdown': 0.1
-    },
     'cash_limit': {
         'min': 0,
         'max': np.inf
