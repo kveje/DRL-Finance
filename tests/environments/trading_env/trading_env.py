@@ -38,6 +38,12 @@ class TestTradingEnv(unittest.TestCase):
         self.constraint_params = {
             "position_limits": {"min": -100, "max": 100}
         }
+        self.ohlcv_dim = 5
+        self.tech_dim = 3
+        self.n_assets = len(self.processed_data["ticker"].unique())
+        self.window_size = self.env_params["window_size"]
+        self.market_cols = self.columns["ohlcv"] + self.columns["tech_cols"]
+        self.asset_list = list(self.processed_data["ticker"].unique())
 
     
     def test_trading_env_initialization(self):
@@ -66,15 +72,11 @@ class TestTradingEnv(unittest.TestCase):
         self.assertEqual(env.portfolio_value_history, [self.env_params["initial_balance"]])
         
         # Action space
-        self.assertEqual(env.action_space.shape, (len(self.processed_data["ticker"].unique()),))
+        self.assertEqual(env.action_space.shape, (self.n_assets,))
         
         # Observation space
-        ohlcv_dim = 5 * 3
-        tech_dim = 3 * 3
-        position_dim = 3
-        cash_dim = 1
-        portfolio_dim = 1
-        self.assertEqual(env.observation_space.shape, (ohlcv_dim + tech_dim + position_dim + cash_dim + portfolio_dim, self.env_params["window_size"]))
+        self.assertEqual(list(env.observation_space.keys()), sorted(["data", "positions", "portfolio_info"]))
+        self.assertEqual(env.observation_space["data"].shape, (self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
 
         # Initialize state
         self.assertEqual(env.current_step, self.env_params["window_size"])
@@ -120,16 +122,52 @@ class TestTradingEnv(unittest.TestCase):
         observation, reward, done, info = env.step(action)
         self.assertEqual(reward, 0.0)
         self.assertEqual(done, False)
-        print(f"observation: {observation}")
+        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
+        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([self.env_params["initial_balance"], self.env_params["initial_balance"]])))
 
         # Test case 2: Action violates the constraints
         action = np.array([1000, -5, 0])
         observation, reward, done, info = env.step(action)
         self.assertEqual(done, True)
+        self.assertEqual(reward, -1000.0)
+        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
 
         env.reset()
         self.assertFalse(env.done)
 
+        # Test case 3: Action is within the constraints
+        action = np.array([1, 1, 1])
+        observation, reward, done, info = env.step(action)
+        self.assertEqual(done, False)
+        self.assertTrue(np.array_equal(observation["positions"], np.ones(shape=(self.n_assets))))
+        
+
+    def test_observation_space(self):
+        """Test the observation space of the TradingEnv class."""
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+        )
+
+        observation = env.reset()
+        # Shapes
+        self.assertEqual(observation["data"].shape, (self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
+        self.assertEqual(observation["positions"].shape, (self.n_assets,))
+        self.assertEqual(observation["portfolio_info"].shape, (2,))
+
+        # Values
+        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
+        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([self.env_params["initial_balance"], self.env_params["initial_balance"]])))
+        days = [0,1,2]
+        for i, asset in enumerate(self.asset_list):
+            for j, col in enumerate(self.market_cols):
+                for k, day in enumerate(days):
+                    self.assertEqual(observation["data"][i, j, k], self.processed_data[self.processed_data["ticker"] == asset].iloc[day][col])
 
     
 
