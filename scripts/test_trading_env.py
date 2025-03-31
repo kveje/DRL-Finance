@@ -77,15 +77,25 @@ def main():
     print(f"Processed data: {processed_data.shape}")
     print(f"Normalized data: {normalized_data.shape}")
 
+    # Generating columns dictionary
+    columns = {
+        "ticker": "ticker",
+        "price": "close",
+        "day": "day",
+        "ohlcv": ["open", "high", "low", "close", "volume"],
+        "tech_cols": [col for col in processed_data.columns if col not in ["ticker", "day", "open", "high", "low", "close", "volume", "date", "timestamp"]],
+    }
+
     # Create environment
     print("\nCreating trading environment...")
     env = TradingEnv(
         processed_data=normalized_data,
         raw_data=raw_data,
+        columns=columns,
         env_params=ENV_PARAMS,
         friction_params=MARKET_FRIC_PARAMS,
         constraint_params=CONSTRAINT_PARAMS,
-        reward_params=REWARD_PARAMS,
+        reward_params=REWARD_PARAMS["returns_based"],
         seed=42,
     )
 
@@ -94,7 +104,7 @@ def main():
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
     print(f"Number of assets: {env.n_assets}")
-    print(f"Number of technical indicators: {len(env.technical_columns)}")
+    print(f"Number of technical indicators: {len(env.tech_cols)}")
 
     # Run test episode
     print("\nRunning test episode...")
@@ -106,20 +116,20 @@ def main():
 
     while not done:
         # Random action (for testing)
-        action = env.action_space.sample()
+        action = np.ones(shape=(env.n_assets,))
 
         # Take step
         obs, reward, done, info = env.step(action)
 
         # Record portfolio value
-        portfolio_values.append(info["balance"])
+        portfolio_values.append(info["portfolio_value"])
 
         # Accumulate reward
         total_reward += reward
         step_count += 1
 
         if step_count % 100 == 0:
-            print(f"Step {step_count}: Portfolio value = ${info['balance']:.2f}")
+            print(f"Step {step_count}: Portfolio value = ${info['portfolio_value']:.2f}")
 
     # Calculate statistics
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
