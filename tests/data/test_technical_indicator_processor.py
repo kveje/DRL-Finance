@@ -97,9 +97,12 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
                 "displacement": 26,
             },
             "keltner": {"ema_window": 20, "atr_window": 10, "multiplier": 2},
+            "returns": {"window": 1},
+            "log_returns": {"window": 1},
+            "linreg": {"window": 5},
         }
         result = self.processor.process(
-            self.test_data, indicators=None, ticker_column="ticker", params=params
+            self.test_data, indicators=None, params=params
         )
 
         # Check that we have more columns than original data
@@ -119,9 +122,9 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         self.assertIn("sma_20", result.columns)
         self.assertIn("ema_20", result.columns)
         self.assertIn("rsi_14", result.columns)
-        self.assertIn("macd_line", result.columns)
-        self.assertIn("macd_signal", result.columns)
-        self.assertIn("macd_hist", result.columns)
+        self.assertIn("macd_line_12_26", result.columns)
+        self.assertIn("macd_signal_9", result.columns)
+        self.assertIn("macd_hist_12_26_9", result.columns)
         self.assertIn("bb_middle_20", result.columns)
         self.assertIn("bb_upper_20", result.columns)
         self.assertIn("bb_lower_20", result.columns)
@@ -137,15 +140,21 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         self.assertIn("mfi_14", result.columns)
         self.assertIn("roc_12", result.columns)
         self.assertIn("williams_r_14", result.columns)
-        self.assertIn("vwap", result.columns)
-        self.assertIn("tenkan_sen", result.columns)
-        self.assertIn("kijun_sen", result.columns)
-        self.assertIn("senkou_span_a", result.columns)
-        self.assertIn("senkou_span_b", result.columns)
-        self.assertIn("chikou_span", result.columns)
-        self.assertIn("keltner_middle", result.columns)
-        self.assertIn("keltner_upper", result.columns)
-        self.assertIn("keltner_lower", result.columns)
+        self.assertIn("vwap_daily", result.columns)
+        self.assertIn("tenkan_sen_9", result.columns)
+        self.assertIn("kijun_sen_26", result.columns)
+        self.assertIn("senkou_span_a_26", result.columns)
+        self.assertIn("senkou_span_b_52_26", result.columns)
+        self.assertIn("chikou_span_26", result.columns)
+        self.assertIn("keltner_middle_20", result.columns)
+        self.assertIn("keltner_upper_20_10_2", result.columns)
+        self.assertIn("keltner_lower_20_10_2", result.columns)
+        self.assertIn("returns_1", result.columns)
+        self.assertIn("log_returns_1", result.columns)
+        self.assertIn("linreg_slope_5", result.columns)
+        self.assertIn("linreg_intercept_5", result.columns)
+        self.assertIn("linreg_r2_5", result.columns)
+        self.assertIn("linreg_slope_pvalue_5", result.columns)
 
     def test_process_specific_indicators(self):
         """Test processing only specific indicators."""
@@ -179,15 +188,15 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         self.assertNotIn("mfi_14", result.columns)
         self.assertNotIn("roc_12", result.columns)
         self.assertNotIn("williams_r_14", result.columns)
-        self.assertNotIn("vwap", result.columns)
-        self.assertNotIn("tenkan_sen", result.columns)
-        self.assertNotIn("kijun_sen", result.columns)
-        self.assertNotIn("senkou_span_a", result.columns)
-        self.assertNotIn("senkou_span_b", result.columns)
-        self.assertNotIn("chikou_span", result.columns)
-        self.assertNotIn("keltner_middle", result.columns)
-        self.assertNotIn("keltner_upper", result.columns)
-        self.assertNotIn("keltner_lower", result.columns)
+        self.assertNotIn("vwap_daily", result.columns)
+        self.assertNotIn("tenkan_sen_9", result.columns)
+        self.assertNotIn("kijun_sen_26", result.columns)
+        self.assertNotIn("senkou_span_a_26", result.columns)
+        self.assertNotIn("senkou_span_b_52_26", result.columns)
+        self.assertNotIn("chikou_span_26", result.columns)
+        self.assertNotIn("keltner_middle_20", result.columns)
+        self.assertNotIn("keltner_upper_20_10_2", result.columns)
+        self.assertNotIn("keltner_lower_20_10_2", result.columns)
 
     def test_sma(self):
         """Test SMA calculation specifically."""
@@ -222,7 +231,6 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         self.assertTrue((result["rsi_14"].iloc[20:] > 70).all())
 
         # First (window) values should be NaN
-        print(result["rsi_14"].iloc[:13])
         self.assertTrue(result["rsi_14"].iloc[:13].isna().all())
 
         # Rest should be calculated
@@ -237,18 +245,18 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         result = self.processor.calc_macd(apple_data)
 
         # Check that all MACD columns are created
-        self.assertIn("macd_line", result.columns)
-        self.assertIn("macd_signal", result.columns)
-        self.assertIn("macd_hist", result.columns)
+        self.assertIn("macd_line_12_26", result.columns)
+        self.assertIn("macd_signal_9", result.columns)
+        self.assertIn("macd_hist_12_26_9", result.columns)
 
         # For our uptrend test data, MACD line should be positive after enough data points
-        self.assertTrue((result["macd_line"].iloc[30:] > 0).all())
+        self.assertTrue((result["macd_line_12_26"].iloc[30:] > 0).all())
 
         # Histogram should be difference of line and signal
         for i in range(30, 40):
             self.assertAlmostEqual(
-                result["macd_hist"].iloc[i],
-                result["macd_line"].iloc[i] - result["macd_signal"].iloc[i],
+                result["macd_hist_12_26_9"].iloc[i],
+                result["macd_line_12_26"].iloc[i] - result["macd_signal_9"].iloc[i],
                 places=6,
             )
 
@@ -318,6 +326,26 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
         )
         # Should still calculate SMA but ignore invalid indicator
         self.assertIn("sma_5", result.columns)
+
+    def test_linear_regression(self):
+        """Test linear regression calculation specifically."""
+        # Only test on AAPL data for simplicity
+        apple_data = self.test_data[self.test_data["ticker"] == "AAPL"].copy()
+
+        # Calculate linear regression
+        result = self.processor.calc_linear_regression(apple_data)
+
+        self.assertIn("linreg_slope_5", result.columns)
+        self.assertIn("linreg_intercept_5", result.columns)
+        self.assertIn("linreg_r2_5", result.columns)
+        self.assertIn("linreg_slope_pvalue_5", result.columns)
+
+        # Check values are correct
+        self.assertAlmostEqual(result["linreg_slope_5"].iloc[-1], 0.00, places=2)
+        self.assertAlmostEqual(result["linreg_intercept_5"].iloc[-1], 0.01, places=2)
+        self.assertAlmostEqual(result["linreg_r2_5"].iloc[-1], 1.0, places=2)
+        self.assertAlmostEqual(result["linreg_slope_pvalue_5"].iloc[-1], 0.0, places=2)
+    
 
 
 if __name__ == "__main__":
