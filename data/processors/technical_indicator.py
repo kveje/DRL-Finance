@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Union, Any
 
 import pandas as pd
 import numpy as np
+from scipy.stats import linregress
+from scipy.stats._stats_py import LinregressResult
 
 class TechnicalIndicatorProcessor:
     """Processor for calculating technical indicators on financial data.
@@ -17,7 +19,7 @@ class TechnicalIndicatorProcessor:
     commonly used in financial analysis and algorithmic trading.
     """
 
-    def __init__(self):
+    def __init__(self, columns: Optional[Dict[str, Any]] = None):
         """Initialize the technical indicator processor."""
         # Define all available indicators
         self.available_indicators = {
@@ -37,13 +39,24 @@ class TechnicalIndicatorProcessor:
             "vwap": self.calc_vwap,
             "ichimoku": self.calc_ichimoku,
             "keltner": self.calc_keltner_channels,
+            "returns": self.calc_returns,
+            "log_returns": self.calc_log_returns,
+            "linreg": self.calc_linear_regression,
+        }
+        self.columns = columns or {
+            "date": "date",
+            "ticker": "ticker",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume",
         }
 
     def process(
         self,
         data: pd.DataFrame,
         indicators: List[str] = None,
-        ticker_column: str = "ticker",
         params: Dict[str, Any] = None,
     ) -> pd.DataFrame:
         """Process data to add technical indicators.
@@ -52,7 +65,6 @@ class TechnicalIndicatorProcessor:
             data: DataFrame with price data (must include date, OHLCV and ticker columns)
             indicators: List of indicator names to calculate.
                         If None, calculates all available indicators.
-            ticker_column: Name of the column containing ticker symbols
             params: Dictionary of parameters for specific indicators
                     e.g. {'sma': {'windows': [10, 20, 50]}}
 
@@ -66,15 +78,7 @@ class TechnicalIndicatorProcessor:
             raise ValueError("Empty DataFrame provided")
 
         # Check required columns
-        required_cols = [
-            "date",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            ticker_column,
-        ]
+        required_cols = list(self.columns.values())
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
@@ -101,15 +105,15 @@ class TechnicalIndicatorProcessor:
             indicators_to_calc = [
                 ind for ind in indicators if ind in self.available_indicators
             ]
-
+            
         logger.info(f"Calculating indicators: {indicators_to_calc}")
 
         # Process each ticker separately
-        unique_tickers = df[ticker_column].unique()
+        unique_tickers = df[self.columns["ticker"]].unique()
         result_dfs = []
 
         for ticker in unique_tickers:
-            ticker_data = df[df[ticker_column] == ticker].copy().sort_values("date")
+            ticker_data = df[df[self.columns["ticker"]] == ticker].copy().sort_values(self.columns["date"])
 
             # Apply each indicator calculation
             for indicator in indicators_to_calc:
@@ -131,7 +135,7 @@ class TechnicalIndicatorProcessor:
             result = pd.concat(result_dfs, ignore_index=True)
 
             # Sort by date and ticker
-            result.sort_values(["date", ticker_column], inplace=True)
+            result.sort_values(["date", self.columns["ticker"]], inplace=True)
 
             return result
         else:
@@ -152,7 +156,7 @@ class TechnicalIndicatorProcessor:
             DataFrame with added SMA columns
         """
         for window in windows:
-            df[f"sma_{window}"] = df["close"].rolling(window=window).mean()
+            df[f"sma_{window}"] = df[self.columns["close"]].rolling(window=window).mean()
         return df
 
     def calc_ema(
@@ -168,7 +172,7 @@ class TechnicalIndicatorProcessor:
             DataFrame with added EMA columns
         """
         for window in windows:
-            df[f"ema_{window}"] = df["close"].ewm(span=window, adjust=False).mean()
+            df[f"ema_{window}"] = df[self.columns["close"]].ewm(span=window, adjust=False).mean()
         return df
 
     def calc_rsi(self, df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
@@ -181,7 +185,7 @@ class TechnicalIndicatorProcessor:
         Returns:
             DataFrame with added RSI column
         """
-        delta = df["close"].diff()
+        delta = df[self.columns["close"]].diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
 
@@ -209,15 +213,15 @@ class TechnicalIndicatorProcessor:
             DataFrame with added MACD columns
         """
         # Calculate MACD line
-        fast_ema = df["close"].ewm(span=fast, adjust=False).mean()
-        slow_ema = df["close"].ewm(span=slow, adjust=False).mean()
-        df["macd_line"] = fast_ema - slow_ema
+        fast_ema = df[self.columns["close"]].ewm(span=fast, adjust=False).mean()
+        slow_ema = df[self.columns["close"]].ewm(span=slow, adjust=False).mean()
+        df[f"macd_line_{fast}_{slow}"] = fast_ema - slow_ema
 
         # Calculate signal line
-        df["macd_signal"] = df["macd_line"].ewm(span=signal, adjust=False).mean()
+        df[f"macd_signal_{signal}"] = df[f"macd_line_{fast}_{slow}"].ewm(span=signal, adjust=False).mean()
 
         # Calculate histogram
-        df["macd_hist"] = df["macd_line"] - df["macd_signal"]
+        df[f"macd_hist_{fast}_{slow}_{signal}"] = df[f"macd_line_{fast}_{slow}"] - df[f"macd_signal_{signal}"]
 
         return df
 
@@ -235,17 +239,17 @@ class TechnicalIndicatorProcessor:
             DataFrame with added Bollinger Bands columns
         """
         # Calculate middle band (SMA)
-        df[f"bb_middle_{window}"] = df["close"].rolling(window=window).mean()
+        df[f"bb_middle_{window}"] = df[self.columns["close"]].rolling(window=window).mean()
 
         # Calculate standard deviation
-        rolling_std = df["close"].rolling(window=window).std()
+        rolling_std = df[self.columns["close"]].rolling(window=window).std()
 
         # Calculate upper and lower bands
         df[f"bb_upper_{window}"] = df[f"bb_middle_{window}"] + (rolling_std * num_std)
         df[f"bb_lower_{window}"] = df[f"bb_middle_{window}"] - (rolling_std * num_std)
 
         # Calculate %B (position within bands)
-        df[f"bb_pct_b_{window}"] = (df["close"] - df[f"bb_lower_{window}"]) / (
+        df[f"bb_pct_b_{window}"] = (df[self.columns["close"]] - df[f"bb_lower_{window}"]) / (
             df[f"bb_upper_{window}"] - df[f"bb_lower_{window}"]
         )
 
@@ -262,20 +266,20 @@ class TechnicalIndicatorProcessor:
             DataFrame with added ATR column
         """
         # Calculate the three components of True Range
-        high_low = df["high"] - df["low"]
-        high_close_prev = abs(df["high"] - df["close"].shift(1))
-        low_close_prev = abs(df["low"] - df["close"].shift(1))
+        high_low = df[self.columns["high"]] - df[self.columns["low"]]
+        high_close_prev = abs(df[self.columns["high"]] - df[self.columns["close"]].shift(1))
+        low_close_prev = abs(df[self.columns["low"]] - df[self.columns["close"]].shift(1))
 
         # True Range is the maximum of these three
-        df["tr"] = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(
+        df[f"tr_{window}"] = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(
             axis=1
         )
 
         # ATR is the simple moving average of the True Range
-        df[f"atr_{window}"] = df["tr"].rolling(window=window).mean()
+        df[f"atr_{window}"] = df[f"tr_{window}"].rolling(window=window).mean()
 
         # Remove temporary column
-        df.drop(columns=["tr"], inplace=True)
+        df.drop(columns=[f"tr_{window}"], inplace=True)
 
         return df
 
@@ -289,16 +293,16 @@ class TechnicalIndicatorProcessor:
             DataFrame with added OBV column
         """
         # Calculate daily price change direction
-        price_direction = np.sign(df["close"].diff())
+        price_direction = np.sign(df[self.columns["close"]].diff())
 
         # Replace 0 with 1 (if price unchanged, count volume as positive)
         price_direction = price_direction.replace(0, 1)
 
         # Calculate daily OBV contribution
-        daily_obv = df["volume"] * price_direction
+        daily_obv = df[self.columns["volume"]] * price_direction
 
         # Cumulative sum gives us OBV
-        df["obv"] = daily_obv.cumsum()
+        df[f"obv"] = daily_obv.cumsum()
 
         return df
 
@@ -313,16 +317,16 @@ class TechnicalIndicatorProcessor:
             DataFrame with added ADX columns
         """
         # Calculate True Range
-        high_low = df["high"] - df["low"]
-        high_close_prev = abs(df["high"] - df["close"].shift(1))
-        low_close_prev = abs(df["low"] - df["close"].shift(1))
+        high_low = df[self.columns["high"]] - df[self.columns["low"]]
+        high_close_prev = abs(df[self.columns["high"]] - df[self.columns["close"]].shift(1))
+        low_close_prev = abs(df[self.columns["low"]] - df[self.columns["close"]].shift(1))
         true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(
             axis=1
         )
 
         # Calculate Directional Movement
-        pos_dm = df["high"].diff()
-        neg_dm = df["low"].diff() * -1
+        pos_dm = df[self.columns["high"]].diff()
+        neg_dm = df[self.columns["low"]].diff() * -1
         pos_dm = pos_dm.where((pos_dm > neg_dm) & (pos_dm > 0), 0)
         neg_dm = neg_dm.where((neg_dm > pos_dm) & (neg_dm > 0), 0)
 
@@ -354,7 +358,7 @@ class TechnicalIndicatorProcessor:
             DataFrame with added CCI column
         """
         # Calculate typical price
-        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        typical_price = (df[self.columns["high"]] + df[self.columns["low"]] + df[self.columns["close"]]) / 3
 
         # Calculate SMA of typical price
         tp_sma = typical_price.rolling(window).mean()
@@ -381,10 +385,10 @@ class TechnicalIndicatorProcessor:
             DataFrame with added Stochastic columns
         """
         # Calculate %K
-        lowest_low = df["low"].rolling(k_window).min()
-        highest_high = df["high"].rolling(k_window).max()
+        lowest_low = df[self.columns["low"]].rolling(k_window).min()
+        highest_high = df[self.columns["high"]].rolling(k_window).max()
         df[f"stoch_k_{k_window}"] = (
-            100 * (df["close"] - lowest_low) / (highest_high - lowest_low)
+            100 * (df[self.columns["close"]] - lowest_low) / (highest_high - lowest_low)
         )
 
         # Calculate %D
@@ -405,10 +409,10 @@ class TechnicalIndicatorProcessor:
             DataFrame with added MFI column
         """
         # Calculate typical price
-        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        typical_price = (df[self.columns["high"]] + df[self.columns["low"]] + df[self.columns["close"]]) / 3
 
         # Calculate raw money flow
-        raw_money_flow = typical_price * df["volume"]
+        raw_money_flow = typical_price * df[self.columns["volume"]]
 
         # Calculate positive and negative money flow
         positive_flow = raw_money_flow.where(typical_price > typical_price.shift(1), 0)
@@ -435,7 +439,7 @@ class TechnicalIndicatorProcessor:
             DataFrame with added ROC column
         """
         # Calculate ROC
-        df[f"roc_{window}"] = ((df["close"] / df["close"].shift(window)) - 1) * 100
+        df[f"roc_{window}"] = ((df[self.columns["close"]] / df[self.columns["close"]].shift(window)) - 1) * 100
 
         return df
 
@@ -450,12 +454,12 @@ class TechnicalIndicatorProcessor:
             DataFrame with added Williams %R column
         """
         # Calculate highest high and lowest low
-        highest_high = df["high"].rolling(window).max()
-        lowest_low = df["low"].rolling(window).min()
+        highest_high = df[self.columns["high"]].rolling(window).max()
+        lowest_low = df[self.columns["low"]].rolling(window).min()
 
         # Calculate Williams %R
         df[f"williams_r_{window}"] = (
-            -100 * (highest_high - df["close"]) / (highest_high - lowest_low)
+            -100 * (highest_high - df[self.columns["close"]]) / (highest_high - lowest_low)
         )
 
         return df
@@ -474,42 +478,38 @@ class TechnicalIndicatorProcessor:
         result = df.copy()
 
         # Convert date to datetime if it's not already
-        if not pd.api.types.is_datetime64_any_dtype(result["date"]):
-            result["date"] = pd.to_datetime(result["date"])
-
+        if not pd.api.types.is_datetime64_any_dtype(result[self.columns["date"]]):
+            result[self.columns["date"]] = pd.to_datetime(result[self.columns["date"]])
         # Create grouping based on reset_period
         if reset_period == "daily":
-            result["vwap_group"] = result["date"].dt.date
+            result[f"vwap_group_{reset_period}"] = result[self.columns["date"]].dt.date
         elif reset_period == "weekly":
-            result["vwap_group"] = result["date"].dt.isocalendar().week
+            result[f"vwap_group_{reset_period}"] = result[self.columns["date"]].dt.isocalendar().week
         elif reset_period == "monthly":
-            result["vwap_group"] = result["date"].dt.month
+            result[f"vwap_group_{reset_period}"] = result[self.columns["date"]].dt.month
         else:
-            result["vwap_group"] = 1  # No reset (one group)
-
+            result[f"vwap_group_{reset_period}"] = 1  # No reset (one group)
         # Calculate typical price
-        result["typical_price"] = (result["high"] + result["low"] + result["close"]) / 3
+        result[f"typical_price_{reset_period}"] = (result[self.columns["high"]] + result[self.columns["low"]] + result[self.columns["close"]]) / 3
 
         # Calculate VWAP components
-        result["price_volume"] = result["typical_price"] * result["volume"]
-
+        result[f"price_volume_{reset_period}"] = result[f"typical_price_{reset_period}"] * result[self.columns["volume"]]
+        
         # Group by the reset period and calculate VWAP
-        result["cumulative_price_volume"] = result.groupby("vwap_group")[
-            "price_volume"
-        ].cumsum()
-        result["cumulative_volume"] = result.groupby("vwap_group")["volume"].cumsum()
+        result[f"cumulative_price_volume_{reset_period}"] = result.groupby(f"vwap_group_{reset_period}")[f"price_volume_{reset_period}"].cumsum()
+        result[f"cumulative_volume_{reset_period}"] = result.groupby(f"vwap_group_{reset_period}")[self.columns["volume"]].cumsum()
 
         # VWAP calculation
-        result["vwap"] = result["cumulative_price_volume"] / result["cumulative_volume"]
+        result[f"vwap_{reset_period}"] = result[f"cumulative_price_volume_{reset_period}"] / result[f"cumulative_volume_{reset_period}"]
 
         # Clean up temporary columns
         result.drop(
             columns=[
-                "vwap_group",
-                "typical_price",
-                "price_volume",
-                "cumulative_price_volume",
-                "cumulative_volume",
+                f"vwap_group_{reset_period}",
+                f"typical_price_{reset_period}",
+                f"price_volume_{reset_period}",
+                f"cumulative_price_volume_{reset_period}",
+                f"cumulative_volume_{reset_period}",
             ],
             inplace=True,
         )
@@ -537,33 +537,33 @@ class TechnicalIndicatorProcessor:
             DataFrame with added Ichimoku Cloud columns
         """
         # Calculate Tenkan-sen (Conversion Line): (highest high + lowest low)/2 for the past tenkan_window periods
-        df["tenkan_sen"] = (
-            df["high"].rolling(window=tenkan_window).max()
-            + df["low"].rolling(window=tenkan_window).min()
+        df[f"tenkan_sen_{tenkan_window}"] = (
+            df[self.columns["high"]].rolling(window=tenkan_window).max()
+            + df[self.columns["low"]].rolling(window=tenkan_window).min()
         ) / 2
 
         # Calculate Kijun-sen (Base Line): (highest high + lowest low)/2 for the past kijun_window periods
-        df["kijun_sen"] = (
-            df["high"].rolling(window=kijun_window).max()
-            + df["low"].rolling(window=kijun_window).min()
+        df[f"kijun_sen_{kijun_window}"] = (
+            df[self.columns["high"]].rolling(window=kijun_window).max()
+            + df[self.columns["low"]].rolling(window=kijun_window).min()
         ) / 2
 
         # Calculate Senkou Span A (Leading Span A): (Tenkan-sen + Kijun-sen)/2 displaced forward displacement periods
-        df["senkou_span_a"] = ((df["tenkan_sen"] + df["kijun_sen"]) / 2).shift(
+        df[f"senkou_span_a_{displacement}"] = ((df[f"tenkan_sen_{tenkan_window}"] + df[f"kijun_sen_{kijun_window}"]) / 2).shift(
             displacement
         )
 
         # Calculate Senkou Span B (Leading Span B): (highest high + lowest low)/2 for the past senkou_span_b_window periods, displaced forward displacement periods
-        df["senkou_span_b"] = (
+        df[f"senkou_span_b_{senkou_span_b_window}_{displacement}"] = (
             (
-                df["high"].rolling(window=senkou_span_b_window).max()
-                + df["low"].rolling(window=senkou_span_b_window).min()
+                df[self.columns["high"]].rolling(window=senkou_span_b_window).max()
+                + df[self.columns["low"]].rolling(window=senkou_span_b_window).min()
             )
             / 2
         ).shift(displacement)
 
         # Calculate Chikou Span (Lagging Span): Current closing price, displaced backwards displacement periods
-        df["chikou_span"] = df["close"].shift(-displacement)
+        df[f"chikou_span_{displacement}"] = df[self.columns["close"]].shift(-displacement)
 
         return df
 
@@ -586,19 +586,61 @@ class TechnicalIndicatorProcessor:
             DataFrame with added Keltner Channels columns
         """
         # Calculate the EMA of the typical price
-        df["keltner_middle"] = df["close"].ewm(span=ema_window, adjust=False).mean()
+        df[f"keltner_middle_{ema_window}"] = df[self.columns["close"]].ewm(span=ema_window, adjust=False).mean()
 
         # Calculate the ATR
-        high_low = df["high"] - df["low"]
-        high_close_prev = abs(df["high"] - df["close"].shift(1))
-        low_close_prev = abs(df["low"] - df["close"].shift(1))
+        high_low = df[self.columns["high"]] - df[self.columns["low"]]
+        high_close_prev = abs(df[self.columns["high"]] - df[self.columns["close"]].shift(1))
+        low_close_prev = abs(df[self.columns["low"]] - df[self.columns["close"]].shift(1))
         true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(
             axis=1
         )
         atr = true_range.ewm(span=atr_window, adjust=False).mean()
 
         # Calculate the upper and lower bands
-        df["keltner_upper"] = df["keltner_middle"] + (multiplier * atr)
-        df["keltner_lower"] = df["keltner_middle"] - (multiplier * atr)
+        df[f"keltner_upper_{ema_window}_{atr_window}_{multiplier}"] = df[f"keltner_middle_{ema_window}"] + (multiplier * atr)
+        df[f"keltner_lower_{ema_window}_{atr_window}_{multiplier}"] = df[f"keltner_middle_{ema_window}"] - (multiplier * atr)
+
+        return df
+    
+    def calc_returns(self, df: pd.DataFrame, window: int = 1) -> pd.DataFrame:
+        """Calculate returns.
+
+        Args:
+            df: DataFrame with price data for a single ticker
+            window: Period length for calculation
+        """
+        df[f"returns_{window}"] = df[self.columns["close"]].pct_change(periods=window)
+        return df
+    
+    def calc_log_returns(self, df: pd.DataFrame, window: int = 1) -> pd.DataFrame:
+        """Calculate log returns.
+
+        Args:
+            df: DataFrame with price data for a single ticker
+            window: Period length for calculation
+        """
+        df[f"log_returns_{window}"] = np.log(df[self.columns["close"]] / df[self.columns["close"]].shift(window))
+        return df
+    
+    def calc_linear_regression(self, df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
+        """Calculate linear regression.
+
+        Args:
+            df: DataFrame with price data for a single ticker
+            window: Period length for calculation
+
+        Returns:
+            DataFrame with added linear regression columns
+        """
+        # Calculate returns if not already calculated
+        if not df.columns.isin([f"returns_{window}"]).all():
+            df = self.calc_returns(df, window)
+        
+        # Regress returns against index
+        df[f"linreg_slope_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).slope)
+        df[f"linreg_intercept_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).intercept)
+        df[f"linreg_r2_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).rvalue**2)
+        df[f"linreg_slope_pvalue_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).pvalue)
 
         return df
