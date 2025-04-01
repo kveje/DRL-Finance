@@ -53,11 +53,11 @@ class TradingEnv(BaseTradingEnv):
         self.raw_data: pd.DataFrame = raw_data
 
         # Data columns setup
-        self.tic_col: str = columns["ticker"]
-        self.price_col: str = columns["price"]
-        self.day_col: str = columns["day"]
-        self.ohlcv_cols: List[str] = columns["ohlcv"]
-        self.tech_cols: List[str] = columns["tech_cols"]
+        self.tic_col: str = columns.get("ticker", "ticker")
+        self.price_col: str = columns.get("price", "close")
+        self.day_col: str = columns.get("day", "day")
+        self.ohlcv_cols: List[str] = columns.get("ohlcv", [])
+        self.tech_cols: List[str] = columns.get("tech_cols", [])
         self.market_cols: List[str] = self.ohlcv_cols + self.tech_cols
 
         # Asset setup
