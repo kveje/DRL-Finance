@@ -17,8 +17,8 @@ class TestTradingEnv(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.raw_data = pd.read_csv("tests/environments/trading_env/raw_test.csv", skipinitialspace=True, index_col="day")
-        self.processed_data = pd.read_csv("tests/environments/trading_env/processed_test.csv", skipinitialspace=True, index_col="day")
+        self.raw_data = pd.read_csv("tests/environments/trading_env/raw_test.csv", skipinitialspace=True)
+        self.processed_data = pd.read_csv("tests/environments/trading_env/processed_test.csv", skipinitialspace=True)
         self.columns = {
             "ticker": "ticker",
             "price": "close",
@@ -116,6 +116,7 @@ class TestTradingEnv(unittest.TestCase):
             reward_params=self.reward_params,
             constraint_params=self.constraint_params,
         )
+        env.reset()
 
         # Test case 1: Action is within the constraints
         action = np.array([0, 0, 0])
@@ -123,23 +124,23 @@ class TestTradingEnv(unittest.TestCase):
         self.assertEqual(reward, 0.0)
         self.assertEqual(done, False)
         self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
-        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([self.env_params["initial_balance"], self.env_params["initial_balance"]])))
+        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([1, 0])))
 
         # Test case 2: Action violates the constraints
+        env.reset()
         action = np.array([1000, -5, 0])
         observation, reward, done, info = env.step(action)
         self.assertEqual(done, True)
         self.assertEqual(reward, -1000.0)
         self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
-
+       
+        # Test case 3: Action is within the constraints
         env.reset()
         self.assertFalse(env.done)
-
-        # Test case 3: Action is within the constraints
         action = np.array([1, 1, 1])
         observation, reward, done, info = env.step(action)
         self.assertEqual(done, False)
-        self.assertTrue(np.array_equal(observation["positions"], np.ones(shape=(self.n_assets))))
+        self.assertEqual(sum(observation["positions"]) + observation["portfolio_info"][0], 1)
         
 
     def test_observation_space(self):
@@ -162,12 +163,38 @@ class TestTradingEnv(unittest.TestCase):
 
         # Values
         self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
-        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([self.env_params["initial_balance"], self.env_params["initial_balance"]])))
+        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([1, 0])))
         days = [0,1,2]
         for i, asset in enumerate(self.asset_list):
             for j, col in enumerate(self.market_cols):
                 for k, day in enumerate(days):
                     self.assertEqual(observation["data"][i, j, k], self.processed_data[self.processed_data["ticker"] == asset].iloc[day][col])
+
+    def test_done(self):
+        """Test the that the environment is done, when no more data is left."""
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+        )
+        i = 1
+        observation = env.reset()
+        while not env.done:
+            i += 1
+            env.step(np.zeros(shape=(self.n_assets,)))
+
+        self.assertTrue(env.done)
+        self.assertEqual(env.current_step, env.max_step)
+        self.assertEqual(i, 3)
+
+    def test_standardize_observation(self):
+        """Test the standardize_observation method of the TradingEnv class."""
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+        )
 
     
 

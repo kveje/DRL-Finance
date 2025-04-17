@@ -80,7 +80,7 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
             "ema": {"windows": [20]},
             "rsi": {"window": 14},
             "macd": {"fast": 12, "slow": 26, "signal": 9},
-            "bb": {"window": 20, "num_std": 2},
+            "bollinger": {"window": 20, "num_std": 2},
             "atr": {"window": 14},
             "obv": {},
             "adx": {"window": 14},
@@ -102,7 +102,7 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
             "linreg": {"window": 5},
         }
         result = self.processor.process(
-            self.test_data, indicators=None, params=params
+            self.test_data, params=params
         )
 
         # Check that we have more columns than original data
@@ -158,8 +158,8 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
 
     def test_process_specific_indicators(self):
         """Test processing only specific indicators."""
-        indicators = ["sma", "rsi"]
-        result = self.processor.process(self.test_data, indicators=indicators)
+        params = {"sma": {"windows": [5, 10]}, "rsi": {"window": 14}}
+        result = self.processor.process(self.test_data, params=params)
 
         # Check for SMA columns
         self.assertIn("sma_5", result.columns)
@@ -322,7 +322,7 @@ class TestTechnicalIndicatorProcessor(unittest.TestCase):
 
         # Invalid indicator name
         result = self.processor.process(
-            self.test_data, indicators=["invalid_indicator", "sma"]
+            self.test_data, params={"invalid_indicator": {"window": 14}, "sma": {"windows": [5, 10]}}
         )
         # Should still calculate SMA but ignore invalid indicator
         self.assertIn("sma_5", result.columns)
