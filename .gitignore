@@ -12,3 +12,6 @@
 *.cpython-312.pyc
 *.csv
 *.cpython-312.pyc
+data/raw/
+data/processed/
+data/normalized/
