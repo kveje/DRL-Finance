@@ -22,6 +22,8 @@ class NormalizeProcessor(BaseProcessor):
     """
 
     VALID_METHODS = ["zscore", "rolling", "percentage"]
+    COLUMNS_TO_IGNORE = ["date", "day", "ticker", "day_index", "time_index", "timestamp"]
+    STARTS_WITH_COLUMNS_TO_IGNORE = ["linreg_"]
 
     def __init__(self, method: str = NORMALIZATION_PARAMS["method"]):
         """Initialize normalization processor.
@@ -46,6 +48,8 @@ class NormalizeProcessor(BaseProcessor):
         columns: List[str],
         window: int = 20,
         group_by: Optional[str] = None,
+        handle_outliers: bool = True,
+        fill_value: Union[float, str, None] = 0,
         **kwargs,
     ) -> pd.DataFrame:
         """Normalize the input data.
@@ -55,6 +59,12 @@ class NormalizeProcessor(BaseProcessor):
             columns: List of columns to normalize.
             window: Window size for rolling normalization (default: 20).
             group_by: Column to group by before normalizing (e.g., 'ticker').
+            handle_outliers: Whether to replace inf/-inf values (default: True).
+            fill_value: How to handle NA/inf values after normalization:
+                       - If numeric value: Fill with that value
+                       - If 'ffill': Forward fill (use last valid value)
+                       - If 'bfill': Backward fill
+                       - If None: Leave NA values as is
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -62,6 +72,13 @@ class NormalizeProcessor(BaseProcessor):
         """
         # Make a copy to avoid modifying the original data
         result = data.copy()
+
+        # Cast results to float (but not date, ticker, day, etc.)
+        result[result.select_dtypes(include=[np.number]).columns] = result.select_dtypes(include=[np.number]).astype(float)
+
+        # Drop columns to ignore
+        columns = [col for col in columns if col not in self.COLUMNS_TO_IGNORE]
+        columns = [col for col in columns if not any(col.startswith(prefix) for prefix in self.STARTS_WITH_COLUMNS_TO_IGNORE)]
 
         # Process data with the specified method
         if self.method == "zscore":
@@ -73,6 +90,23 @@ class NormalizeProcessor(BaseProcessor):
         else:
             raise ValueError(f"Invalid normalization method: {self.method}")
 
+        # Handle outliers (inf, -inf values) that may result from division operations
+        if handle_outliers:
+            for col in columns:
+                if col in result.columns:
+                    # Replace inf and -inf with NaN temporarily
+                    result[col] = result[col].replace([np.inf, -np.inf], np.nan)
+
+        # Handle NA values based on fill_value parameter
+        if fill_value is not None:
+            if fill_value == 'ffill':
+                result = result.ffill()
+            elif fill_value == 'bfill':
+                result = result.bfill()
+            else:
+                # Assume fill_value is a numeric value
+                result = result.fillna(fill_value)
+
         return result
 
     def process_by_groups(
@@ -80,6 +114,8 @@ class NormalizeProcessor(BaseProcessor):
         data: pd.DataFrame,
         feature_groups: Dict[str, List[str]],
         group_by: Optional[str] = "ticker",
+        handle_outliers: bool = True,
+        fill_value: Union[float, str, None] = 0,
     ) -> pd.DataFrame:
         """Normalize the input data by feature groups.
 
@@ -90,6 +126,8 @@ class NormalizeProcessor(BaseProcessor):
                                     "volume": ["volume"],
                                     "momentum": ["rsi", "rsi_signal"]}
             group_by: Column to group by before normalizing (default: "ticker").
+            handle_outliers: Whether to replace inf/-inf values.
+            fill_value: How to handle NA/inf values after normalization.
 
         Returns:
             Normalized DataFrame.
@@ -108,7 +146,11 @@ class NormalizeProcessor(BaseProcessor):
 
             # Apply normalization to this feature group
             result = self.process(
-                data=result, columns=feature_columns, group_by=group_by
+                data=result, 
+                columns=feature_columns, 
+                group_by=group_by,
+                handle_outliers=handle_outliers,
+                fill_value=fill_value
             )
 
         return result
@@ -149,6 +191,9 @@ class NormalizeProcessor(BaseProcessor):
 
                 # Replace zero std with 1 to avoid division by zero
                 stds = stds.replace(0, 1)
+                
+                # Replace NaN std with 1 to avoid invalid operations
+                stds = stds.fillna(1)
 
                 # Store stats for potential future use
                 self.stats["zscore"][group] = {"mean": means, "std": stds}
@@ -166,6 +211,9 @@ class NormalizeProcessor(BaseProcessor):
 
             # Replace zero std with 1 to avoid division by zero
             stds = stds.replace(0, 1)
+            
+            # Replace NaN std with 1 to avoid invalid operations
+            stds = stds.fillna(1)
 
             # Store stats for potential future use
             self.stats["zscore"] = {"mean": means, "std": stds}
@@ -283,7 +331,7 @@ class NormalizeProcessor(BaseProcessor):
 
                 for col in columns:
                     # Calculate percentage change
-                    pct_change = group_data[col].pct_change()
+                    pct_change = group_data[col].pct_change(fill_method=None)
 
                     # Fill NaN values (first row) with zeros
                     pct_change = pct_change.fillna(0)
@@ -297,7 +345,7 @@ class NormalizeProcessor(BaseProcessor):
 
             for col in columns:
                 # Calculate percentage change
-                result[col] = result[col].pct_change().fillna(0)
+                result[col] = result[col].pct_change(fill_method=None).fillna(0)
 
         return result
 
