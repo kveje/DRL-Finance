@@ -1,28 +1,21 @@
-finrl
-ccxt
-gym
-yfinance
-pandas
+# Core dependencies
 numpy
+pandas
 matplotlib
-stable-baselines3
+seaborn
 torch
-exchange-calendars
-alpaca-trade-api
-stockstats
-wrds
-shimmy
-gymnasium
-torchaudio
 torchvision
+torchaudio
 
-# Manual Data Loading
-pyyaml
-exchange_calendars
-stockstats
-scikit-learn
+# RL libraries
+gym
+gymnasium
+
+# Financial data
 yfinance
-alpaca-trade-api
+finrl
+
+# Visualization and tracking
 wandb
 tensorboard
 torch-tb-profiler
