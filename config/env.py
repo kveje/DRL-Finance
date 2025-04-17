@@ -19,21 +19,21 @@ MARKET_FRIC_PARAMS = {
 
 CONSTRAINT_PARAMS = {
     'position_limits': {
-        'min': -1000,
-        'max': 1000
+        'min': 0,
+        'max': 10000
     },
     'cash_limit': {
         'min': 0,
-        'max': np.inf
+        'max': 100000 * 2
     }
 }
 
 REWARD_PARAMS = {
     "returns_based": ("returns_based", {
-        "scale": 1.0
+        "scale": 10.0
     }),
     "sharpe_based": ("sharpe_based", {
-        "annual_risk_free_rate": 0.01,
+        "annual_risk_free_rate": 0.02,
         "annualization_factor": 252,
         "window_size": 20,
         "min_history_size": 10,
