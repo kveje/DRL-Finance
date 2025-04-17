@@ -1,5 +1,5 @@
 """
-Logging utility for the financial RL project.
+Simplified logging utility for the DRL-Finance project.
 Provides unified logging functionality across the application.
 """
 
@@ -10,85 +10,136 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union, Any, List
-import numpy as np
 import inspect
 
-from torch.utils.tensorboard import SummaryWriter
-import wandb
+# Optional imports for metrics logging
+try:
+    import numpy as np
+    from torch.utils.tensorboard import SummaryWriter
+    import wandb
+    _HAS_METRICS_LOGGING = True
+except ImportError:
+    _HAS_METRICS_LOGGING = False
+
+class LogConfig:
+    """
+    Centralized configuration for all loggers.
+    Modify these settings to change the behavior of all loggers.
+    """
+    # Log levels
+    CONSOLE_LOG_LEVEL = logging.INFO  # Set to logging.WARNING to reduce console output
+    FILE_LOG_LEVEL = logging.INFO
+    
+    # Output control
+    LOG_TO_CONSOLE = True            # Set to False to disable all console output
+    LOG_TO_FILE = True               # Set to False to disable file logging
+    LOG_TO_WANDB = False             # Set to True to enable Weights & Biases logging
+    LOG_TO_TENSORBOARD = False       # Set to True to enable TensorBoard logging
+    
+    # Paths and naming
+    LOG_DIR = "logs"                 # Base directory for log files
+    LOG_FILENAME = "drl_finance.log" # Single log file for all modules
+    EXPERIMENT_DIR = None            # If set, logs will go to this directory instead of LOG_DIR
+    EXPERIMENT_NAME = None           # Will be auto-generated if None
+    PROJECT_ROOT = None              # Will be auto-detected if None
+    
+    # W&B Configuration
+    WANDB_PROJECT = "drl-finance"
+    WANDB_ENTITY = None
+    WANDB_TAGS = None
+    
+    # Formatting
+    LOG_FORMAT = "%(asctime)s - %(name)s - %(caller_file)s:%(caller_line)d - %(levelname)s - %(message)s"
+    DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+    
+    # Internal state
+    _initialized = False
+    _file_handler = None
+    _loggers = {}
+
+    @classmethod
+    def init(cls):
+        """Initialize global logging configuration."""
+        if cls._initialized:
+            # Close existing file handler if we're re-initializing
+            if cls._file_handler:
+                cls._file_handler.close()
+                cls._file_handler = None
+            
+        # Set project root if not manually set
+        if cls.PROJECT_ROOT is None:
+            # Get the project root (assuming this file is in utils/)
+            cls.PROJECT_ROOT = str(Path(__file__).parent.parent)
+            
+        # Set experiment name if not manually set
+        if cls.EXPERIMENT_NAME is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cls.EXPERIMENT_NAME = f"DRL_Finance_{timestamp}"
+            
+        # Create log directory if needed
+        if cls.EXPERIMENT_DIR:
+            # Use experiment-specific directory
+            cls.log_path = Path(cls.EXPERIMENT_DIR) / "logs"
+            log_filename = f"{cls.EXPERIMENT_NAME}.log"
+        else:
+            # Use default log directory
+            cls.log_path = Path(cls.PROJECT_ROOT) / cls.LOG_DIR
+            log_filename = cls.LOG_FILENAME
+            
+        os.makedirs(cls.log_path, exist_ok=True)
+        
+        # Set up file handler if enabled
+        if cls.LOG_TO_FILE:
+            log_file = cls.log_path / log_filename
+            if cls._file_handler:
+                cls._file_handler.close()
+            cls._file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            formatter = logging.Formatter(cls.LOG_FORMAT, datefmt=cls.DATE_FORMAT)
+            cls._file_handler.setFormatter(formatter)
+            cls._file_handler.setLevel(cls.FILE_LOG_LEVEL)
+
+        cls._initialized = True
+
+# Initialize logging configuration
+LogConfig.init()
 
 class Logger:
     """
-    Unified logger class that handles console, file, and optional
-    experiment tracking (Weights & Biases and/or TensorBoard).
+    Simplified logger class with a focus on ease of use and consistency.
+    Uses a single log file by default and provides better control over console output.
     """
-
-    _instance = None
-    _loggers = {}  # Dictionary to store module-specific loggers
-    _initialized = False  # Flag to track if the main logger has been initialized
-    _file_handler = None  # Shared file handler for all loggers
-    _project_root = None  # Project root directory
-    _experiment_name = None  # Shared experiment name for all loggers
 
     def __init__(
         self,
         name: str,
-        level: str = "INFO",
-        log_dir: Optional[str] = None,
-        log_to_file: bool = True,
-        log_to_console: bool = True,
-        log_to_wandb: bool = False,
-        log_to_tensorboard: bool = False,
+        level: Optional[int] = None,
+        log_to_console: Optional[bool] = None,
+        log_to_file: Optional[bool] = None,
+        log_to_wandb: Optional[bool] = None,
+        log_to_tensorboard: Optional[bool] = None,
         config: Optional[Dict[str, Any]] = None,
-        wandb_project: Optional[str] = None,
-        wandb_entity: Optional[str] = None,
-        wandb_tags: Optional[List[str]] = None,
-        experiment_name: Optional[str] = None,
     ):
         """
         Initialize the logger.
 
         Args:
             name: Logger name (usually module or class name)
-            level: Logging level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-            log_dir: Directory to store log files
-            log_to_file: Whether to save logs to a file
-            log_to_console: Whether to output logs to console
-            log_to_wandb: Whether to log metrics to Weights & Biases
-            log_to_tensorboard: Whether to log metrics to TensorBoard
-            config: Configuration dictionary to log
-            wandb_project: W&B project name
-            wandb_entity: W&B entity (team) name
-            wandb_tags: Tags for W&B run
-            experiment_name: Name for this experiment run
+            level: Logging level for this specific logger (overrides global config)
+            log_to_console: Whether to output logs to console (overrides global config)
+            log_to_file: Whether to save logs to a file (overrides global config)
+            log_to_wandb: Whether to log metrics to W&B (overrides global config)
+            log_to_tensorboard: Whether to log metrics to TensorBoard (overrides global config)
+            config: Configuration dictionary to log (for W&B/TensorBoard)
         """
-        # Set up the experiment name and directories
         self.name = name
-        self.level = getattr(logging, level.upper())
-
-        # Set project root if not set
-        if Logger._project_root is None:
-            # Get the project root (assuming this file is in utils/)
-            Logger._project_root = str(Path(__file__).parent.parent)
-
-        # Set experiment name if not set
-        if Logger._experiment_name is None:
-            if experiment_name is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                Logger._experiment_name = f"DRL_Finance_{timestamp}"
-            else:
-                Logger._experiment_name = experiment_name
-
-        self.experiment_name = Logger._experiment_name
-
-        if log_dir is None:
-            self.log_dir = Path(Logger._project_root) / "logs" / self.experiment_name
-        else:
-            self.log_dir = Path(log_dir) / self.experiment_name
-
-        # Create log directory if needed
-        if log_to_file or log_to_tensorboard:
-            os.makedirs(self.log_dir, exist_ok=True)
-
+        self.level = level if level is not None else LogConfig.FILE_LOG_LEVEL
+        
+        # Use instance settings if provided, otherwise use global config
+        self.log_to_console = log_to_console if log_to_console is not None else LogConfig.LOG_TO_CONSOLE
+        self.log_to_file = log_to_file if log_to_file is not None else LogConfig.LOG_TO_FILE
+        self.log_to_wandb = log_to_wandb if log_to_wandb is not None else LogConfig.LOG_TO_WANDB
+        self.log_to_tensorboard = log_to_tensorboard if log_to_tensorboard is not None else LogConfig.LOG_TO_TENSORBOARD
+        
         # Set up Python logger
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.level)
@@ -96,74 +147,45 @@ class Logger:
         self.logger.propagate = False  # Prevent propagation to root logger
 
         # Set up formatter
-        formatter = logging.Formatter(
-            "%(asctime)s - %(caller_file)s:%(caller_line)d - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        formatter = logging.Formatter(LogConfig.LOG_FORMAT, datefmt=LogConfig.DATE_FORMAT)
 
         # Set up console handler
-        if log_to_console and not Logger._initialized:
+        if self.log_to_console:
+            console_level = level if level is not None else LogConfig.CONSOLE_LOG_LEVEL
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
+            console_handler.setLevel(console_level)
             self.logger.addHandler(console_handler)
 
-        # Set up file handler only for the first logger instance
-        if log_to_file and not Logger._initialized:
-            log_file = self.log_dir / f"{self.experiment_name}.log"
-            Logger._file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-            Logger._file_handler.setFormatter(formatter)
-            Logger._file_handler.setLevel(self.level)  # Set the level for the file handler
-            Logger._initialized = True
-
-        # Add the shared file handler to this logger
-        if Logger._file_handler is not None:
-            self.logger.addHandler(Logger._file_handler)
-            # Ensure the logger's level is set correctly
-            self.logger.setLevel(self.level)
-
-        # Initialize experiment tracking only for the first logger instance
-        if not Logger._initialized:
-            self.use_wandb = log_to_wandb
-            self.use_tensorboard = log_to_tensorboard
-
-            # Log the config
-            if config is not None:
-                config_file = self.log_dir / "config.json"
-                with open(config_file, "w") as f:
-                    json.dump(config, f, indent=4)
-                self.info(f"Configuration saved to {config_file}")
-
-            # Initialize W&B
-            if self.use_wandb:
+        # Add the shared file handler if logging to file
+        if self.log_to_file and LogConfig._file_handler is not None:
+            self.logger.addHandler(LogConfig._file_handler)
+        
+        # Initialize metrics logging if needed and supported
+        self.tb_writer = None
+        if _HAS_METRICS_LOGGING:
+            if self.log_to_wandb and not wandb.run:
                 wandb.init(
-                    project=wandb_project,
-                    entity=wandb_entity,
+                    project=LogConfig.WANDB_PROJECT,
+                    entity=LogConfig.WANDB_ENTITY,
                     config=config,
-                    name=self.experiment_name,
-                    tags=wandb_tags,
-                    dir=self.log_dir,
+                    name=LogConfig.EXPERIMENT_NAME,
+                    tags=LogConfig.WANDB_TAGS,
+                    dir=LogConfig.log_path,
                 )
-                self.info("Initialized Weights & Biases logging")
-
-            # Initialize TensorBoard
-            if self.use_tensorboard:
-                self.tb_writer = SummaryWriter(log_dir=self.log_dir / "tensorboard")
-                self.info("Initialized TensorBoard logging")
-        else:
-            self.use_wandb = False
-            self.use_tensorboard = False
-            self.tb_writer = None
+                
+            if self.log_to_tensorboard:
+                tensorboard_dir = LogConfig.log_path / "tensorboard"
+                os.makedirs(tensorboard_dir, exist_ok=True)
+                self.tb_writer = SummaryWriter(log_dir=tensorboard_dir)
 
     def _get_caller_info(self):
         """Get information about the caller of the logging method."""
         caller_frame = inspect.stack()[2]  # Skip this method and the logging method
-        # Get the absolute path and convert to relative path from project root
         abs_path = caller_frame.filename
         try:
-            # Try to get the relative path from the project root
-            rel_path = os.path.relpath(abs_path, Logger._project_root)
+            rel_path = os.path.relpath(abs_path, LogConfig.PROJECT_ROOT)
         except ValueError:
-            # If we can't get the relative path, just use the filename
             rel_path = os.path.basename(abs_path)
             
         return {
@@ -192,144 +214,118 @@ class Logger:
         """Log a critical message."""
         self.logger.critical(msg, extra=self._get_caller_info())
 
-    def log_metric(
-        self, name: str, value: Union[float, int], step: Optional[int] = None
-    ):
+    def log_metric(self, name: str, value: Union[float, int], step: Optional[int] = None):
         """
         Log a numerical metric to experiment tracking platforms.
+        No-op if metrics logging is not enabled or supported.
 
         Args:
             name: Name of the metric
             value: Value of the metric
             step: Training step or episode number
         """
-        if self.use_wandb:
+        if not _HAS_METRICS_LOGGING:
+            return
+            
+        if self.log_to_wandb and wandb.run:
             data = {name: value}
             if step is not None:
                 wandb.log(data, step=step)
             else:
                 wandb.log(data)
 
-        if self.use_tensorboard and self.tb_writer is not None:
+        if self.log_to_tensorboard and self.tb_writer is not None:
             if step is not None:
                 self.tb_writer.add_scalar(name, value, step)
             else:
                 self.tb_writer.add_scalar(name, value, 0)
 
-    def log_metrics(
-        self, metrics: Dict[str, Union[float, int]], step: Optional[int] = None
-    ):
+    def log_metrics(self, metrics: Dict[str, Union[float, int]], step: Optional[int] = None):
         """
         Log multiple metrics at once.
+        No-op if metrics logging is not enabled or supported.
 
         Args:
             metrics: Dictionary of metric names and values
             step: Training step or episode number
         """
-        if self.use_wandb:
+        if not _HAS_METRICS_LOGGING:
+            return
+            
+        if self.log_to_wandb and wandb.run:
             if step is not None:
                 wandb.log(metrics, step=step)
             else:
                 wandb.log(metrics)
 
-        if self.use_tensorboard and self.tb_writer is not None:
+        if self.log_to_tensorboard and self.tb_writer is not None:
             for name, value in metrics.items():
                 if step is not None:
                     self.tb_writer.add_scalar(name, value, step)
                 else:
                     self.tb_writer.add_scalar(name, value, 0)
 
-    def log_histogram(self, name: str, values: np.ndarray, step: Optional[int] = None):
-        """
-        Log a histogram of values.
-
-        Args:
-            name: Name of the histogram
-            values: Array of values
-            step: Training step or episode number
-        """
-        if self.use_tensorboard and self.tb_writer is not None:
-            if step is not None:
-                self.tb_writer.add_histogram(name, values, step)
-            else:
-                self.tb_writer.add_histogram(name, values, 0)
-
-        # W&B also supports histograms but with different API
-        if self.use_wandb:
-            if step is not None:
-                wandb.log({name: wandb.Histogram(values)}, step=step)
-            else:
-                wandb.log({name: wandb.Histogram(values)})
-
-    def log_figure(self, name: str, figure, step: Optional[int] = None):
-        """
-        Log a matplotlib figure.
-
-        Args:
-            name: Name of the figure
-            figure: Matplotlib figure object
-            step: Training step or episode number
-        """
-        if self.use_wandb:
-            if step is not None:
-                wandb.log({name: wandb.Image(figure)}, step=step)
-            else:
-                wandb.log({name: wandb.Image(figure)})
-
-        if self.use_tensorboard and self.tb_writer is not None:
-            if step is not None:
-                self.tb_writer.add_figure(name, figure, step)
-            else:
-                self.tb_writer.add_figure(name, figure, 0)
-
     def close(self):
         """Close all log handlers and experiment tracking sessions."""
         # Close file handlers
         for handler in self.logger.handlers[:]:
-            if handler != Logger._file_handler:  # Don't close the shared file handler
+            if handler != LogConfig._file_handler:  # Don't close the shared file handler
                 handler.close()
                 self.logger.removeHandler(handler)
-
-        # Close the shared file handler only if this is the last logger
-        if Logger._file_handler is not None and len(Logger._loggers) == 1:
-            Logger._file_handler.close()
-            Logger._file_handler = None
-            Logger._initialized = False
-
+        
         # Close TensorBoard writer
-        if (
-            self.use_tensorboard
-            and hasattr(self, "tb_writer")
-            and self.tb_writer is not None
-        ):
+        if _HAS_METRICS_LOGGING and self.tb_writer is not None:
             self.tb_writer.close()
-
-        # Finish W&B run
-        if self.use_wandb:
-            wandb.finish()
+            self.tb_writer = None
 
     @classmethod
-    def get_logger(cls, name: Optional[str] = None, level: str = "INFO", log_dir: Optional[str] = None, **kwargs) -> 'Logger':
+    def get_logger(cls, name: Optional[str] = None, level: Optional[int] = None, **kwargs) -> 'Logger':
         """
         Get or create a logger instance for the specified name.
         
         Args:
             name: Optional logger name. If None, uses the caller's module name
             level: Logging level
-            log_dir: Directory for log files
             **kwargs: Additional arguments for Logger initialization
         """
         # If no name provided, get the caller's module name
         if name is None:
-            # Get the caller's module name
-            stack = inspect.stack()
-            # Skip the first frame (this function) and get the caller's frame
-            caller_frame = stack[1]
-            # Get the module name from the frame's globals
-            name = caller_frame.filename.split('\\')[-1].replace('.py', '')
+            caller_frame = inspect.stack()[1]  # Get the caller's frame
+            # Get the module name from the frame's filename
+            name = os.path.basename(caller_frame.filename).replace('.py', '')
         
         # If we don't have a logger for this name, create one
-        if name not in cls._loggers:
-            cls._loggers[name] = cls(name, level, log_dir, **kwargs)
+        if name not in LogConfig._loggers:
+            LogConfig._loggers[name] = cls(name, level, **kwargs)
             
-        return cls._loggers[name]
+        return LogConfig._loggers[name]
+        
+    @classmethod
+    def configure(cls, **kwargs):
+        """
+        Update the global logging configuration.
+        
+        Example:
+            Logger.configure(
+                LOG_TO_CONSOLE=False,
+                CONSOLE_LOG_LEVEL=logging.WARNING,
+                LOG_FILENAME="my_custom_log.log"
+            )
+        """
+        for key, value in kwargs.items():
+            if hasattr(LogConfig, key):
+                setattr(LogConfig, key, value)
+            else:
+                print(f"Warning: Unknown configuration option '{key}'")
+        
+        # Re-initialize with new settings
+        LogConfig.init()
+        
+        # Update existing loggers with new settings
+        for logger in LogConfig._loggers.values():
+            # Reconnect file handler if needed
+            if LogConfig._file_handler is not None and LogConfig.LOG_TO_FILE and logger.log_to_file:
+                if LogConfig._file_handler not in logger.logger.handlers:
+                    logger.logger.addHandler(LogConfig._file_handler)
+        
+        return cls
