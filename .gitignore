@@ -16,3 +16,4 @@ data/raw/
 data/processed/
 data/normalized/
 *.pt
+README.PDF
