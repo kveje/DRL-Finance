@@ -1,45 +1,46 @@
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Any
+import random
 
-class MeanReversionStrategy:
+class RandomStrategy:
     """
-    Mean Reversion strategy that buys assets when their price falls below
-    their historical mean and sells when they rise above it.
+    Random trading strategy that makes random buy/sell/hold decisions.
+    Serves as a baseline comparison for algorithmic strategies.
     """
     
     def __init__(self, 
                  assets: List[str], 
                  initial_capital: float = 10000.0,
-                 window_size: int = 20,
-                 z_threshold: float = 1.0,
-                 position_size: float = 0.2,
-                 transaction_cost: float = 0.001):
+                 trade_probability: float = 0.2,
+                 position_size: float = 0.1,
+                 transaction_cost: float = 0.001,
+                 seed: int = None):
         """
-        Initialize the Mean Reversion strategy.
+        Initialize the Random strategy.
         
         Args:
             assets: List of asset tickers to trade
             initial_capital: Starting capital
-            window_size: Window size for calculating moving average and standard deviation
-            z_threshold: Z-score threshold for trading signals
+            trade_probability: Probability of making a trade on any given day
             position_size: Percentage of portfolio to allocate to each position
             transaction_cost: Cost of transaction as a fraction of trade value
+            seed: Random seed for reproducibility
         """
         self.assets = assets
         self.initial_capital = initial_capital
-        self.window_size = window_size
-        self.z_threshold = z_threshold
+        self.trade_probability = trade_probability
         self.position_size = position_size
         self.transaction_cost = transaction_cost
+        
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
         
         self.positions = {asset: 0 for asset in assets}
         self.cash = initial_capital
         self.portfolio_value_history = []
         self.position_history = []
-        
-        # Price history for mean reversion calculation
-        self.price_history = {asset: [] for asset in assets}
     
     def reset(self):
         """Reset the strategy to initial state."""
@@ -47,53 +48,39 @@ class MeanReversionStrategy:
         self.cash = self.initial_capital
         self.portfolio_value_history = []
         self.position_history = []
-        self.price_history = {asset: [] for asset in self.assets}
     
-    def calculate_z_scores(self) -> Dict[str, float]:
+    def make_random_trades(self, prices: Dict[str, float]):
         """
-        Calculate z-scores for each asset based on current price and historical mean/std.
-        
-        Returns:
-            Dictionary mapping assets to z-scores
-        """
-        z_scores = {}
-        
-        for asset, prices in self.price_history.items():
-            if len(prices) >= self.window_size:
-                # Calculate mean and standard deviation for the window
-                window = prices[-self.window_size:]
-                mean = np.mean(window)
-                std = np.std(window)
-                
-                if std > 0:  # Avoid division by zero
-                    # Calculate z-score: (current_price - mean) / std
-                    current_price = prices[-1]
-                    z_score = (current_price - mean) / std
-                    z_scores[asset] = z_score
-        
-        return z_scores
-    
-    def execute_trades(self, prices: Dict[str, float], z_scores: Dict[str, float]):
-        """
-        Execute trades based on z-scores.
+        Make random trading decisions.
         
         Args:
             prices: Dictionary mapping assets to their current prices
-            z_scores: Dictionary mapping assets to z-scores
         """
         portfolio_value = self.calculate_portfolio_value(prices)
         
-        for asset, z_score in z_scores.items():
+        for asset in self.assets:
             if asset not in prices:
                 continue
                 
-            current_price = prices[asset]
-            current_shares = self.positions[asset]
-            
-            # Buy signal: price is below mean (negative z-score)
-            if z_score < -self.z_threshold:
-                # Only buy if we don't already have a long position
-                if current_shares <= 0:
+            # Randomly decide whether to trade this asset
+            if random.random() < self.trade_probability:
+                current_price = prices[asset]
+                current_shares = self.positions[asset]
+                
+                # Random choice: 0 = sell, 1 = hold, 2 = buy
+                action = random.randint(0, 2)
+                
+                # Sell action
+                if action == 0 and current_shares > 0:
+                    # Sell all shares
+                    sell_value = current_shares * current_price
+                    transaction_fee = sell_value * self.transaction_cost
+                    
+                    self.cash += sell_value - transaction_fee
+                    self.positions[asset] = 0
+                
+                # Buy action
+                elif action == 2:
                     # Calculate position size based on portfolio value
                     amount_to_invest = portfolio_value * self.position_size
                     shares_to_buy = int(amount_to_invest / current_price)
@@ -105,19 +92,9 @@ class MeanReversionStrategy:
                         total_cost = cost + transaction_fee
                         
                         if total_cost <= self.cash:
-                            self.positions[asset] = shares_to_buy
+                            # Add to existing position if any
+                            self.positions[asset] += shares_to_buy
                             self.cash -= total_cost
-            
-            # Sell signal: price is above mean (positive z-score)
-            elif z_score > self.z_threshold:
-                # Sell if we have a long position
-                if current_shares > 0:
-                    # Execute sell
-                    sell_value = current_shares * current_price
-                    transaction_fee = sell_value * self.transaction_cost
-                    
-                    self.cash += sell_value - transaction_fee
-                    self.positions[asset] = 0
     
     def calculate_portfolio_value(self, prices: Dict[str, float]) -> float:
         """
@@ -153,16 +130,8 @@ class MeanReversionStrategy:
         Returns:
             Dict containing current positions, cash, and portfolio value
         """
-        # Update price history
-        for asset, price in prices.items():
-            if asset in self.price_history:
-                self.price_history[asset].append(price)
-        
-        # Execute trades if we have enough history
-        if current_step >= self.window_size:
-            z_scores = self.calculate_z_scores()
-            if z_scores:
-                self.execute_trades(prices, z_scores)
+        # Make random trades
+        self.make_random_trades(prices)
         
         # Calculate portfolio value
         portfolio_value = self.calculate_portfolio_value(prices)
@@ -216,4 +185,4 @@ class MeanReversionStrategy:
             "total_return": total_return,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown
-        }
+        } 

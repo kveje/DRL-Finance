@@ -2,37 +2,30 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Any
 
-class BuyAndHoldStrategy:
+class EqualWeightStrategy:
     """
-    Simple Buy and Hold strategy that purchases assets at the beginning and holds 
-    until the end of the trading period.
+    Equal Weight (1/N) strategy that allocates capital equally across all assets
+    and rebalances the portfolio periodically.
     """
     
     def __init__(self, 
                  assets: List[str], 
-                 initial_capital: float = 100000.0,
-                 allocation: Dict[str, float] = None,
+                 initial_capital: float = 10000.0,
+                 rebalance_frequency: int = 20,  # Rebalance every 20 days
                  transaction_cost: float = 0.001):
         """
-        Initialize the Buy and Hold strategy.
+        Initialize the Equal Weight strategy.
         
         Args:
             assets: List of asset tickers to trade
             initial_capital: Starting capital
-            allocation: Dictionary mapping assets to allocation weights (if None, equal weights)
+            rebalance_frequency: How often to rebalance the portfolio (in days)
             transaction_cost: Cost of transaction as a fraction of trade value
         """
         self.assets = assets
         self.initial_capital = initial_capital
+        self.rebalance_frequency = rebalance_frequency
         self.transaction_cost = transaction_cost
-        
-        # Equal weight by default
-        if allocation is None:
-            self.allocation = {asset: 1.0 / len(assets) for asset in assets}
-        else:
-            # Normalize allocation to sum to 1.0
-            total = sum(allocation.values())
-            self.allocation = {k: v / total for k, v in allocation.items()}
         
         self.positions = {asset: 0 for asset in assets}
         self.cash = initial_capital
@@ -46,29 +39,70 @@ class BuyAndHoldStrategy:
         self.portfolio_value_history = []
         self.position_history = []
     
-    def initial_allocation(self, prices: Dict[str, float]):
+    def rebalance_portfolio(self, prices: Dict[str, float]):
         """
-        Allocate initial capital according to the specified allocation weights.
+        Rebalance portfolio to equal weights.
         
         Args:
             prices: Dictionary mapping assets to their current prices
         """
-        for asset, weight in self.allocation.items():
-            if asset not in prices:
+        # Calculate current portfolio value
+        portfolio_value = self.calculate_portfolio_value(prices)
+        
+        # First sell all positions to get a clean slate
+        for asset, shares in self.positions.items():
+            if shares > 0 and asset in prices:
+                sell_value = shares * prices[asset]
+                transaction_fee = sell_value * self.transaction_cost
+                self.cash += sell_value - transaction_fee
+                self.positions[asset] = 0
+        
+        # Count valid assets (those with prices)
+        valid_assets = [asset for asset in self.assets if asset in prices and prices[asset] > 0]
+        
+        if not valid_assets:
+            return
+        
+        # Calculate equal allocation
+        amount_per_asset = self.cash / len(valid_assets) * 0.99  # Keep some cash as buffer
+        
+        # Buy shares according to equal allocation
+        for asset in valid_assets:
+            current_price = prices[asset]
+            if current_price <= 0:
                 continue
                 
             # Calculate shares to buy
-            amount_to_invest = self.cash * weight
-            shares = int(amount_to_invest / prices[asset])
+            shares = int(amount_per_asset / current_price)
             
-            # Execute purchase
-            cost = shares * prices[asset]
-            transaction_fee = cost * self.transaction_cost
-            total_cost = cost + transaction_fee
+            if shares > 0:
+                # Execute purchase
+                cost = shares * current_price
+                transaction_fee = cost * self.transaction_cost
+                total_cost = cost + transaction_fee
+                
+                if total_cost <= self.cash:
+                    self.positions[asset] = shares
+                    self.cash -= total_cost
+    
+    def calculate_portfolio_value(self, prices: Dict[str, float]) -> float:
+        """
+        Calculate current portfolio value.
+        
+        Args:
+            prices: Dictionary mapping assets to their current prices
             
-            if total_cost <= self.cash:
-                self.positions[asset] = shares
-                self.cash -= total_cost
+        Returns:
+            Total portfolio value
+        """
+        portfolio_value = self.cash
+        
+        for asset, shares in self.positions.items():
+            if asset in prices:
+                asset_value = shares * prices[asset]
+                portfolio_value += asset_value
+        
+        return portfolio_value
     
     def step(self, 
              current_step: int, 
@@ -76,8 +110,6 @@ class BuyAndHoldStrategy:
              features: Dict[str, Dict[str, float]] = None) -> Dict[str, Any]:
         """
         Execute a single step of the strategy.
-        At step 0, allocate capital according to weights.
-        For all other steps, hold the position.
         
         Args:
             current_step: Current step in the trading episode
@@ -87,18 +119,13 @@ class BuyAndHoldStrategy:
         Returns:
             Dict containing current positions, cash, and portfolio value
         """
-        if current_step == 0:
-            self.initial_allocation(prices)
+        # Initial allocation or periodic rebalancing
+        if current_step == 0 or current_step % self.rebalance_frequency == 0:
+            self.rebalance_portfolio(prices)
         
         # Calculate portfolio value
-        portfolio_value = self.cash
-        current_positions = {}
-        
-        for asset, shares in self.positions.items():
-            if asset in prices:
-                asset_value = shares * prices[asset]
-                portfolio_value += asset_value
-                current_positions[asset] = shares
+        portfolio_value = self.calculate_portfolio_value(prices)
+        current_positions = {asset: shares for asset, shares in self.positions.items() if shares != 0}
         
         # Record history
         self.portfolio_value_history.append(portfolio_value)
@@ -148,4 +175,4 @@ class BuyAndHoldStrategy:
             "total_return": total_return,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown
-        }
+        } 
