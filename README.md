@@ -15,22 +15,22 @@ A deep reinforcement learning framework for financial trading applications. This
 
 ```
 DRL-Finance/
-├── config/             # Configuration files and parameters
-├── data/               # Data management, sources and processing
-│   ├── processors/     # Data preprocessing components
-│   └── sources/        # Data providers (Yahoo Finance, etc.)
-├── environments/       # Trading environments
-│   ├── constraints/    # Trading constraints (position limits, etc.)
-│   ├── market_friction/# Market frictions (slippage, commission)
-│   └── rewards/        # Reward functions (returns-based, Sharpe ratio)
-├── models/             # RL models and components
-│   ├── agents/         # RL algorithm implementations
+├── config/                  # Configuration files and parameters
+├── data/                    # Data management, sources and processing
+│   ├── processors/          # Data preprocessing components
+│   └── sources/             # Data providers (Yahoo Finance, etc.)
+├── environments/            # Trading environments
+│   ├── constraints/         # Trading constraints (position limits, etc.)
+│   ├── market_friction/     # Market frictions (slippage, commission)
+│   └── rewards/             # Reward functions (returns-based, Sharpe ratio)
+├── models/                  # RL models and components
+│   ├── agents/              # RL algorithm implementations
 │   ├── action_interpreters/ # Action space handlers
-│   └── networks/       # Neural network architectures
-├── scripts/            # Experiment and training scripts
-├── tests/              # Unit and integration tests
-├── utils/              # Utility functions and logging
-└── visualization/      # Visualization tools for trading and data
+│   └── networks/            # Neural network architectures
+├── scripts/                 # Experiment and training scripts
+├── tests/                   # Unit and integration tests
+├── utils/                   # Utility functions and logging
+└── visualization/           # Visualization tools for trading and data
 ```
 
 ## Installation
