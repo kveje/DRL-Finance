@@ -10,7 +10,6 @@ from typing import Dict, List, Optional, Union, Any
 import pandas as pd
 import numpy as np
 from scipy.stats import linregress
-from scipy.stats._stats_py import LinregressResult
 
 class TechnicalIndicatorProcessor:
     """Processor for calculating technical indicators on financial data.
@@ -56,8 +55,8 @@ class TechnicalIndicatorProcessor:
     def process(
         self,
         data: pd.DataFrame,
-        indicators: List[str] = None,
         params: Dict[str, Any] = None,
+        fill_na: Union[str, float, None] = 0,
     ) -> pd.DataFrame:
         """Process data to add technical indicators.
 
@@ -67,6 +66,11 @@ class TechnicalIndicatorProcessor:
                         If None, calculates all available indicators.
             params: Dictionary of parameters for specific indicators
                     e.g. {'sma': {'windows': [10, 20, 50]}}
+            fill_na: How to handle NA values after calculation
+                    - If numeric value: Fill NAs with that value
+                    - If 'ffill': Forward fill (use last valid value)
+                    - If 'bfill': Backward fill
+                    - If None: Leave NAs as is
 
         Returns:
             DataFrame with added technical indicators
@@ -74,6 +78,7 @@ class TechnicalIndicatorProcessor:
         Raises:
             ValueError: If data is empty or doesn't have required columns
         """
+
         if data.empty:
             raise ValueError("Empty DataFrame provided")
 
@@ -86,26 +91,24 @@ class TechnicalIndicatorProcessor:
         # Make a copy to avoid modifying the original
         df = data.copy()
 
-        # Use parameters if provided, otherwise empty dict
-        params = params or {}
-
         # Determine which indicators to calculate
-        if indicators is None:
+        if params is None:
             # Calculate all available indicators
             indicators_to_calc = list(self.available_indicators.keys())
         else:
+            indicators_to_calc = list(params.keys())
             # Check that all requested indicators are available
             unknown_indicators = [
-                ind for ind in indicators if ind not in self.available_indicators
+                ind for ind in indicators_to_calc if ind not in self.available_indicators
             ]
             if unknown_indicators:
                 logger.warning(f"Unknown indicators requested: {unknown_indicators}")
 
             # Calculate only requested indicators that are available
             indicators_to_calc = [
-                ind for ind in indicators if ind in self.available_indicators
+                ind for ind in indicators_to_calc if ind in self.available_indicators
             ]
-            
+
         logger.info(f"Calculating indicators: {indicators_to_calc}")
 
         # Process each ticker separately
@@ -120,7 +123,6 @@ class TechnicalIndicatorProcessor:
                 try:
                     # Get specific parameters for this indicator if available
                     indicator_params = params.get(indicator, {})
-
                     # Call the indicator calculation function with params
                     ticker_data = self.available_indicators[indicator](
                         ticker_data, **indicator_params
@@ -133,6 +135,16 @@ class TechnicalIndicatorProcessor:
         # Combine results
         if result_dfs:
             result = pd.concat(result_dfs, ignore_index=True)
+
+            # Handle NA values based on fill_na parameter
+            if fill_na is not None:
+                if fill_na == 'ffill':
+                    result = result.ffill()
+                elif fill_na == 'bfill':
+                    result = result.bfill()
+                else:
+                    # Assume fill_na is a numeric value
+                    result = result.fillna(fill_na)
 
             # Sort by date and ticker
             result.sort_values(["date", self.columns["ticker"]], inplace=True)
@@ -633,8 +645,11 @@ class TechnicalIndicatorProcessor:
         Returns:
             DataFrame with added linear regression columns
         """
+        # Check whether returns are already in the dataframe
+        calculated_return = df.columns.isin([f"returns_{window}"])
+
         # Calculate returns if not already calculated
-        if not df.columns.isin([f"returns_{window}"]).all():
+        if not calculated_return.any():
             df = self.calc_returns(df, window)
         
         # Regress returns against index
@@ -642,5 +657,9 @@ class TechnicalIndicatorProcessor:
         df[f"linreg_intercept_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).intercept)
         df[f"linreg_r2_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).rvalue**2)
         df[f"linreg_slope_pvalue_{window}"] = df[f"returns_{window}"].rolling(window=window).apply(lambda x: linregress(range(len(x)), x).pvalue)
+
+        # Remove returns column if it was not calculated
+        if not calculated_return.any():
+            df = df.drop(columns=[f"returns_{window}"])
 
         return df
