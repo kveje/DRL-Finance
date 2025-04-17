@@ -58,6 +58,10 @@ class ConstraintManager:
             ):
                 return False
         return True
+    
+    def get_parameters(self, constraint_name: str) -> Dict[str, float]:
+        """Get the parameters of a constraint."""
+        return self.constraints[constraint_name].get_parameters()
 
     def __str__(self) -> str:
         """Return a string representation of the constraint manager."""

@@ -86,6 +86,10 @@ class PositionLimits(BaseConstraint):
         self.min_position = new_limits[0]
         self.max_position = new_limits[1]
 
+    def get_parameters(self) -> Dict[str, Any]:
+        """Get the parameters of the constraint."""
+        return {"min": self.min_position, "max": self.max_position}
+
     def __str__(self) -> str:
         """Return a string representation of the position limits constraint."""
         return f"PositionLimits(limits={self.min_position}, {self.max_position})"

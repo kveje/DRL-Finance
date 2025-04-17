@@ -38,6 +38,10 @@ class CashLimit(BaseConstraint):
         
         return True
     
+    def get_parameters(self) -> Dict[str, Any]:
+        """Get the parameters of the constraint."""
+        return {"min": self.min_cash, "max": self.max_cash}
+    
     def __str__(self) -> str:
         return f"CashLimit(min={self.min_cash}, max={self.max_cash})"
     

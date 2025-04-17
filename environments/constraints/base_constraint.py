@@ -90,6 +90,11 @@ class BaseConstraint(ABC):
         return self.violation_details
     
     @abstractmethod
+    def get_parameters(self) -> Dict[str, Any]:
+        """Get the parameters of the constraint."""
+        pass
+    
+    @abstractmethod
     def __str__(self) -> str:
         """Return a string representation of the constraint."""
         pass
