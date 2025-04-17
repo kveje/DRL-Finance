@@ -1,146 +1,129 @@
 # DRL-Finance
 
-This is a repository for my masters thesis about deep reinforcement learning in finance.
+A deep reinforcement learning framework for financial trading applications. This project implements various RL algorithms for trading in financial markets with realistic constraints, market frictions, and advanced reward functions.
 
-## Dependencies
+## Features
 
-Install dependencies using the following command:
-
-```bash
-pip install -r requirements.txt
-```
+- **Modular Trading Environment**: Built on OpenAI Gym/Gymnasium with realistic market simulations
+- **Multiple RL Algorithms**: Implementations of DQN, Directional DQN, PPO, and A2C agents
+- **Realistic Market Conditions**: Slippage, commission fees, and position constraints
+- **Comprehensive Experiment Management**: Training, validation, visualization, and metrics tracking
+- **Backtesting Framework**: Evaluate strategies on historical data
+- **Advanced Visualization**: Trading activity, portfolio performance, and data insights
 
 ## Project Structure
 
-financial_rl/
-├── config/ ✅
-│ ├── env.py # Environment configuration
-│ ├── data.py # Data processing configuration
-│ ├── models.py # Model architecture configuration
-│ ├── path.py # Path configuration
-│ └── tickers.py # Ticker symbols configuration
-├── data/ ✅
-│ ├── __init__.py
-│ ├── data_manager.py # Unified data management
-│ ├── sources/ # Data source implementations
-│ │ ├── __init__.py
-│ │ ├── base_source.py # Abstract base class
-│ │ ├── yahoo_finance.py
-│ │ ├── alpha_vantage.py
-│ │ └── csv_source.py
-│ ├── processors/ # Data processing pipeline
-│ │ ├── __init__.py
-│ │ ├── feature_engineering.py
-│ │ ├── normalization.py
-│ │ └── universe_selection.py
-│ └── market/ # Market specific logic
-│ ├── __init__.py
-│ ├── market_data.py # Market data container
-│ ├── universe.py # Asset universe management
-│ └── synchronization.py # Cross-market time syncing
-├── environments/ ✅
-│ ├── __init__.py
-│ ├── base_env.py # Abstract gym.Env base
-│ ├── trading_env.py # Main trading environment
-│ ├── market_friction/ # Market friction models
-│ │ ├── __init__.py
-│ │ ├── slippage.py
-│ │ ├── commission.py
-│ │ └── market_impact.py
-│ ├── constraints/ # Trading constraints
-│ │ ├── __init__.py
-│ │ ├── position_limits.py
-│ │ ├── risk_limits.py
-│ │ └── regulatory_limits.py
-│ └── rewards/ # Reward functions
-│ ├── __init__.py
-│ ├── returns_based.py
-│ ├── sharpe_based.py
-│ └── risk_adjusted.py
-├── models/ 🔄
-│ ├── __init__.py
-│ ├── networks/ # Neural network architectures
-│ │ ├── __init__.py
-│ │ ├── mlp.py
-│ │ ├── lstm.py
-│ │ └── transformer.py
-│ ├── agents/ # RL agents
-│ │ ├── __init__.py
-│ │ ├── base_agent.py
-│ │ ├── dqn.py
-│ │ ├── ppo.py
-│ │ └── sac.py
-│ └── risk/ # Risk-sensitive components
-│ ├── __init__.py
-│ ├── bayesian_layer.py
-│ ├── distributional_rl.py
-│ └── risk_measures.py
-├── training/ 🔄
-│ ├── __init__.py
-│ ├── trainer.py # Main training loop
-│ ├── hyperopt/ # Hyperparameter optimization
-│ │ ├── __init__.py
-│ │ ├── wandb_sweep.py # W&B integration
-│ │ ├── optuna_optimizer.py # Alternative to W&B
-│ │ └── param_space.py # Parameter space definitions
-│ └── callbacks/ # Training callbacks
-│ ├── __init__.py
-│ ├── checkpoint.py
-│ ├── early_stopping.py
-│ └── logging.py
-├── evaluation/ 🔄
-│ ├── __init__.py
-│ ├── backtest.py # Backtesting framework
-│ ├── metrics/ # Performance metrics
-│ │ ├── __init__.py
-│ │ ├── returns.py
-│ │ ├── risk.py
-│ │ └── trading.py # Trading-specific metrics
-│ └── visualization/ # Results visualization
-│ ├── __init__.py
-│ ├── performance_plots.py
-│ ├── trade_analysis.py
-│ └── risk_analysis.py
-├── experiments/ ⏳
-│ ├── __init__.py
-│ ├── experiment.py # Experiment base class
-│ ├── ablation.py # Ablation study framework
-│ ├── hyperparameter_sweep.py # Sweep configuration
-│ └── baseline/ # Baseline strategies
-│ ├── __init__.py
-│ ├── buy_and_hold.py
-│ ├── momentum.py
-│ └── mean_reversion.py
-├── utils/ ✅
-│ ├── __init__.py
-│ ├── config.py # Configuration utilities
-│ ├── logger.py # Logging setup
-│ ├── reproducibility.py # Seed and version control
-│ └── profiling.py # Performance profiling
-├── notebooks/ 🔄
-│ ├── data_exploration.ipynb
-│ ├── model_analysis.ipynb
-│ └── results_visualization.ipynb
-├── scripts/ 🔄
-│ ├── download_data.py
-│ ├── preprocess_data.py
-│ └── run_experiment.py
-├── tests/ 🔄
-│ ├── __init__.py
-│ ├── test_env.py
-│ ├── test_models.py
-│ └── test_data.py
-├── docker/ ⏳
-│ ├── Dockerfile
-│ └── docker-compose.yml
-├── requirements.txt ✅
-├── setup.py ⏳
-├── .env.example ⏳
-├── .gitignore ✅
-├── README.md ✅
-└── main.py 🔄
+```
+DRL-Finance/
+├── config/             # Configuration files and parameters
+├── data/               # Data management, sources and processing
+│   ├── processors/     # Data preprocessing components
+│   └── sources/        # Data providers (Yahoo Finance, etc.)
+├── environments/       # Trading environments
+│   ├── constraints/    # Trading constraints (position limits, etc.)
+│   ├── market_friction/# Market frictions (slippage, commission)
+│   └── rewards/        # Reward functions (returns-based, Sharpe ratio)
+├── models/             # RL models and components
+│   ├── agents/         # RL algorithm implementations
+│   ├── action_interpreters/ # Action space handlers
+│   └── networks/       # Neural network architectures
+├── scripts/            # Experiment and training scripts
+├── tests/              # Unit and integration tests
+├── utils/              # Utility functions and logging
+└── visualization/      # Visualization tools for trading and data
+```
 
-Legend:
-✅ Done - Implemented and functional
-🔄 In Progress - Partially implemented
-⏳ Not Begun - Empty or not started
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/kveje/DRL-Finance.git
+cd DRL-Finance
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## Usage
+
+### Setting Up an Experiment
+
+```python
+from models.experiment_manager import ExperimentManager
+from models.agents.dqn_agent import DQNAgent
+from environments.trading_env import TradingEnv
+from models.backtesting import Backtester
+
+# Create environments
+train_env = TradingEnv(
+    processed_data=train_data,
+    raw_data=train_raw_data,
+    columns=data_columns,
+    env_params={"initial_balance": 100000, "window_size": 10},
+    friction_params={"commission": {"commission_rate": 0.001}},
+    reward_params=("returns_based", {"scale": 1.0})
+)
+
+val_env = TradingEnv(
+    # Similar configuration as train_env but with validation data
+)
+
+# Create agent
+agent = DQNAgent(
+    state_dim=train_env.observation_space,
+    action_dim=train_env.action_space,
+    learning_rate=0.001,
+    gamma=0.99,
+    epsilon_start=1.0,
+    epsilon_end=0.1,
+    epsilon_decay=10000
+)
+
+# Create backtester
+backtester = Backtester(val_env)
+
+# Create experiment manager
+experiment = ExperimentManager(
+    experiment_name="dqn_trading_experiment",
+    train_env=train_env,
+    val_env=val_env,
+    agent=agent,
+    backtester=backtester,
+    eval_interval=10,
+    save_interval=5
+)
+
+# Run training
+experiment.train(n_episodes=1000)
+```
+
+### Running Scripts
+
+```bash
+# Setup a new experiment
+python scripts/setup_experiment.py --config config/dqn_experiment.json
+
+# Start training
+python scripts/start_experiment.py --name dqn_trading_experiment
+
+# Continue training from a checkpoint
+python scripts/continue_experiment.py --name dqn_trading_experiment --episodes 500
+```
+
+## Extending the Framework
+
+### Adding a New RL Agent
+
+Create a new agent class in `models/agents/` that inherits from `BaseAgent` and implements the required methods. See the existing agents for examples.
+
+### Adding a New Reward Function
+
+Implement a new reward function in `environments/rewards/` and register it in the `RewardManager`.
+
+### Custom Data Sources
+
+Add new data sources in `data/sources/` and implement the appropriate preprocessing in `data/processors/`.
+
+## License
+
+This project is licensed under the MIT License. See the LICENSE file for details.
