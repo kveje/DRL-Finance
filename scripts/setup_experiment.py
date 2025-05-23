@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+import torch
 
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,14 +20,11 @@ logger = setup_logging(
 
 # Import other modules
 from data.data_manager import DataManager
-from models.agents.directional_dqn_agent import DirectionalDQNAgent
-from models.agents.dqn_agent import DQNAgent
-from models.agents.ppo_agent import PPOAgent
-from models.agents.a2c_agent import A2CAgent
-from models.processors.trading_processor import TradingObservationProcessor
+from models.agents.agent_factory import AgentFactory
 from models.backtesting import Backtester
 from models.experiment_manager import ExperimentManager
 from environments.trading_env import TradingEnv
+from visualization.data_visualization import DataVisualization
 
 # Config imports
 from config.data import (
@@ -39,6 +37,22 @@ from config.data import (
 )
 from config.env import ENV_PARAMS, MARKET_FRIC_PARAMS, CONSTRAINT_PARAMS, REWARD_PARAMS
 from config.tickers import DOW_30_TICKER, NASDAQ_100_TICKER, SP_500_TICKER
+from config.networks import (
+    SIMPLE_DISCRETE_PARAMETRIC_CONFIG,
+    SIMPLE_DISCRETE_BAYESIAN_CONFIG,
+    ADVANCED_DISCRETE_PARAMETRIC_CONFIG,
+    ADVANCED_DISCRETE_BAYESIAN_CONFIG,
+    ADVANCED_CONFIDENCE_PARAMETRIC_CONFIG,
+    ADVANCED_CONFIDENCE_BAYESIAN_CONFIG,
+    ADVANCED_VALUE_PARAMETRIC_CONFIG,
+    ADVANCED_VALUE_BAYESIAN_CONFIG,
+    ADVANCED_FULL_PARAMETRIC_CONFIG,
+    ADVANCED_FULL_BAYESIAN_CONFIG
+)
+from config.interpreter import (
+    DISCRETE_INTERPRETER_CONFIG,
+    CONFIDENCE_SCALED_INTERPRETER_CONFIG
+)
 
 
 def parse_args():
@@ -52,8 +66,24 @@ def parse_args():
     parser.add_argument("--processors", type=str, nargs="+", default=["technical_indicator", "vix"])
     parser.add_argument("--normalize", action="store_true", default=True)
     parser.add_argument("--output-dir", type=str, default="experiments")
-    parser.add_argument("--agent-type", type=str, choices=["DirectionalDQNAgent", "DQNAgent", "PPOAgent", "A2CAgent"], 
-                        default="DirectionalDQNAgent", help="Type of agent to use for the experiment")
+    parser.add_argument("--agent-type", type=str, 
+                        choices=["dqn", "ddpg", "ppo", "a2c"], 
+                        default="dqn", 
+                        help="Type of agent to use for the experiment")
+    parser.add_argument("--interpreter-type", type=str,
+                        choices=["discrete", "confidence_scaled"],
+                        default="discrete",
+                        help="Type of action interpreter to use")
+    parser.add_argument("--network-type", type=str,
+                        choices=["simple", "advanced"],
+                        default="advanced",
+                        help="Type of network architecture to use")
+    parser.add_argument("--use-bayesian", action="store_true",
+                        help="Whether to use Bayesian network heads")
+    parser.add_argument("--visualize-data", action="store_true", default=False, 
+                        help="Whether to generate data visualizations")
+    parser.add_argument("--by-ticker", action="store_true", default=False,
+                        help="Whether to generate stock-specific visualizations")
     
     return parser.parse_args()
 
@@ -127,7 +157,7 @@ def main():
 
     # Split the data into training and validation sets
     logger.info("Splitting data into training and validation sets...")
-    train_data, val_data = data_manager.split_data(
+    normalized_train_data, normalized_val_data = data_manager.split_data(
         data=normalized_data,
         train_start_date=args.train_start_date,
         train_end_date=args.train_end_date,
@@ -145,6 +175,16 @@ def main():
         test_end_date=args.val_end_date,
         strict_chronological=False
     )
+
+    # Split the processed data exactly the same way for consistent behavior
+    processed_train_data, processed_val_data = data_manager.split_data(
+        data=processed_data,
+        train_start_date=args.train_start_date,
+        train_end_date=args.train_end_date,
+        test_start_date=args.val_start_date,
+        test_end_date=args.val_end_date,
+        strict_chronological=False
+    )
     
     # Define column mapping for the environment
     columns = {
@@ -152,63 +192,83 @@ def main():
         "price": "close",
         "day": "day",
         "ohlcv": ["open", "high", "low", "close", "volume"],
-        "tech_cols": [col for col in train_data.columns if col not in ["ticker", "day", "open", "high", "low", "close", "volume", "date", "timestamp"]]
+        "tech_cols": [col for col in normalized_train_data.columns if col not in ["ticker", "day", "open", "high", "low", "close", "volume", "date", "timestamp"]]
     }
     
-    # Generate data visualizations
-    visualizations_dir = experiment_dir / "visualizations"
-    visualizations_dir.mkdir(exist_ok=True)
+    # Generate data visualizations if requested
+    if args.visualize_data:
+        visualizations_dir = experiment_dir / "visualizations"
+        visualizations_dir.mkdir(exist_ok=True)
+        
+        logger.info("Generating data visualizations...")
+        visualizer = DataVisualization(save_dir=str(visualizations_dir))
+        
+        # Generate visualizations for training data
+        train_vis_prefix = "train_data"
+        visualizer.visualize_all(
+            raw_data=raw_train_data,
+            processed_data=processed_train_data,
+            normalized_data=normalized_train_data,
+            columns=None,  # Use all numeric columns
+            tickers=args.assets,
+            output_prefix=train_vis_prefix,
+            by_ticker=args.by_ticker,  # Option for stock-specific plots
+            max_features_per_plot=4  # Limit features per plot for readability
+        )
+        
+        # Generate visualizations for validation data
+        val_vis_prefix = "val_data"
+        visualizer.visualize_all(
+            raw_data=raw_val_data,
+            processed_data=processed_val_data,
+            normalized_data=normalized_val_data,
+            columns=None,  # Use all numeric columns
+            tickers=args.assets,
+            output_prefix=val_vis_prefix,
+            by_ticker=args.by_ticker,  # Option for stock-specific plots
+            max_features_per_plot=4  # Limit features per plot for readability
+        )
+        
+        # Generate comparison between training and validation data
+        visualizer.compare_train_val_datasets(
+            train_data=normalized_train_data,
+            val_data=normalized_val_data,
+            key_columns=["close", "volume"],
+            additional_columns=["open", "high", "low"],
+            save_filename_prefix="train_val"
+        )
+        
+        logger.info(f"Data visualizations saved to {visualizations_dir}")
     
-    # logger.info("Generating data visualizations...")
-    # data_manager.visualize_data(
-    #     raw_data=raw_train_data,
-    #     processed_data=train_data,
-    #     columns=None,  # Use all numeric columns
-    #     time_series_columns=["close", "volume"],
-    #     tickers=args.assets,
-    #     save_dir=str(visualizations_dir),
-    #     output_prefix="train_data"
-    # )
-    # 
-    # data_manager.visualize_data(
-    #     raw_data=raw_val_data,
-    #     processed_data=val_data,
-    #     columns=None,  # Use all numeric columns
-    #     time_series_columns=["close", "volume"],
-    #     tickers=args.assets,
-    #     save_dir=str(visualizations_dir),
-    #     output_prefix="val_data"
-    # )
-    
-    # Save the data snapshots for future reference
+    # Make data directory
     data_dir = experiment_dir / "data"
     data_dir.mkdir(exist_ok=True)
     
-    # Save sample datasets
+    # Save data
     logger.info("Saving data...")
     raw_train_data.to_csv(data_dir / "raw_train_data.csv", index=False)
-    train_data.to_csv(data_dir / "normalized_train_data.csv", index=False)
+    normalized_train_data.to_csv(data_dir / "normalized_train_data.csv", index=False)
     raw_val_data.to_csv(data_dir / "raw_val_data.csv", index=False)
-    val_data.to_csv(data_dir / "normalized_val_data.csv", index=False)
+    normalized_val_data.to_csv(data_dir / "normalized_val_data.csv", index=False)
     
     # Save data info
     with open(data_dir / "data_info.json", 'w') as f:
         json.dump({
             "train_data": {
-                "shape": train_data.shape,
+                "shape": normalized_train_data.shape,
                 "date_range": [
-                    train_data["date"].min().strftime("%Y-%m-%d"),
-                    train_data["date"].max().strftime("%Y-%m-%d")
+                    normalized_train_data["date"].min().strftime("%Y-%m-%d"),
+                    normalized_train_data["date"].max().strftime("%Y-%m-%d")
                 ],
-                "tickers": train_data["ticker"].unique().tolist(),
+                "tickers": normalized_train_data["ticker"].unique().tolist(),
             },
             "val_data": {
-                "shape": val_data.shape,
+                "shape": normalized_val_data.shape,
                 "date_range": [
-                    val_data["date"].min().strftime("%Y-%m-%d"),
-                    val_data["date"].max().strftime("%Y-%m-%d")
+                    normalized_val_data["date"].min().strftime("%Y-%m-%d"),
+                    normalized_val_data["date"].max().strftime("%Y-%m-%d")
                 ],
-                "tickers": val_data["ticker"].unique().tolist(),
+                "tickers": normalized_val_data["ticker"].unique().tolist(),
             }
         }, f, indent=4)
     
@@ -228,7 +288,7 @@ def main():
     # Create environments
     logger.info("Creating training and validation environments...")
     train_env = TradingEnv(
-        processed_data=train_data,
+        processed_data=normalized_train_data,
         raw_data=raw_train_data,
         columns=columns,
         env_params=ENV_PARAMS,
@@ -239,7 +299,7 @@ def main():
     )
     
     val_env = TradingEnv(
-        processed_data=val_data,
+        processed_data=normalized_val_data,
         raw_data=raw_val_data,
         columns=columns,
         env_params=ENV_PARAMS,
@@ -249,25 +309,87 @@ def main():
         render_mode=None,
     )
     
+    # Create agent based on agent type
+    logger.info(f"Initializing {args.agent_type}...")
+    
+    # Select network configuration based on arguments
+    if args.network_type == "simple":
+        # Simple networks only support discrete actions
+        if args.interpreter_type != "discrete":
+            logger.warning("Simple networks only support discrete actions. Forcing discrete interpreter.")
+            args.interpreter_type = "discrete"
+        
+        if args.use_bayesian:
+            network_config = SIMPLE_DISCRETE_BAYESIAN_CONFIG
+        else:
+            network_config = SIMPLE_DISCRETE_PARAMETRIC_CONFIG
+    else:  # advanced
+        if args.interpreter_type == "confidence_scaled":
+            # For confidence scaled, we need both discrete and confidence heads
+            if args.use_bayesian:
+                network_config = ADVANCED_CONFIDENCE_BAYESIAN_CONFIG
+            else:
+                network_config = ADVANCED_CONFIDENCE_PARAMETRIC_CONFIG
+        else:  # discrete
+            if args.agent_type in ["ppo", "a2c"]:  # Value-based agents need value heads
+                if args.use_bayesian:
+                    network_config = ADVANCED_VALUE_BAYESIAN_CONFIG
+                else:
+                    network_config = ADVANCED_VALUE_PARAMETRIC_CONFIG
+            else:  # DQN/DDPG only need discrete heads
+                if args.use_bayesian:
+                    network_config = ADVANCED_DISCRETE_BAYESIAN_CONFIG
+                else:
+                    network_config = ADVANCED_DISCRETE_PARAMETRIC_CONFIG
+    
+    # Update network config with environment-specific parameters
+    network_config["n_assets"] = len(args.assets)
+    network_config["window_size"] = train_env.window_size
+    
+    # Create interpreter configuration
+    interpreter_config = {}
+    if args.interpreter_type == "discrete":
+        interpreter_config = DISCRETE_INTERPRETER_CONFIG.copy()
+        interpreter_config.update({
+            "n_assets": len(args.assets)
+        })
+    elif args.interpreter_type == "confidence_scaled":
+        interpreter_config = CONFIDENCE_SCALED_INTERPRETER_CONFIG.copy()
+        interpreter_config.update({
+            "n_assets": len(args.assets)
+        })
+    
     # Create agent configuration dictionary
     agent_config = {
         "agent_type": args.agent_type,
-        "observation_processor": "TradingObservationProcessor"
+        "interpreter_type": args.interpreter_type,
+        "network_config": network_config,
+        "interpreter_config": interpreter_config,
+        "device": str(device)
     }
     
     # Add agent-specific parameters based on the agent type
-    if args.agent_type in ["DirectionalDQNAgent", "DQNAgent"]:
+    if args.agent_type == "dqn":
         agent_config.update({
-            "learning_rate": 0.001,
+            "learning_rate": 0.0001,
             "gamma": 0.99,
             "epsilon_start": 1.0,
             "epsilon_end": 0.01,
-            "epsilon_decay": 0.999,
+            "epsilon_decay": 0.9999,
             "target_update": 10,
             "memory_size": 10000,
-            "batch_size": 256,
+            "batch_size": 128,
         })
-    elif args.agent_type == "PPOAgent":
+    elif args.agent_type == "ddpg":
+        agent_config.update({
+            "learning_rate_actor": 0.0001,
+            "learning_rate_critic": 0.001,
+            "gamma": 0.99,
+            "tau": 0.001,
+            "memory_size": 100000,
+            "batch_size": 64,
+        })
+    elif args.agent_type == "ppo":
         agent_config.update({
             "learning_rate": 0.0003,
             "gamma": 0.99,
@@ -279,11 +401,11 @@ def main():
             "batch_size": 64,
             "epochs": 10,
         })
-    elif args.agent_type == "A2CAgent":
+    elif args.agent_type == "a2c":
         agent_config.update({
-            "learning_rate": 0.0007,
+            "learning_rate": 0.0001,
             "gamma": 0.99,
-            "value_loss_coef": 0.5,
+            "value_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
         })
@@ -292,59 +414,26 @@ def main():
     with open(config_dir / "agent_config.json", 'w') as f:
         json.dump(agent_config, f, indent=4)
     
-    # Create agent based on agent type
-    logger.info(f"Initializing {args.agent_type}...")
+    # Log the selected configurations
+    logger.info(f"Using {args.network_type} network architecture")
+    logger.info(f"Using {args.interpreter_type} interpreter")
+    logger.info(f"Using {'Bayesian' if args.use_bayesian else 'Parametric'} network heads")
+    if args.interpreter_type == "confidence_scaled":
+        logger.info("Network includes both discrete and confidence heads")
+    elif args.agent_type in ["ppo", "a2c"]:
+        logger.info("Network includes value heads for policy evaluation")
     
-    if args.agent_type == "DirectionalDQNAgent":
-        agent = DirectionalDQNAgent(
-            env=train_env,
-            observation_processor_class=TradingObservationProcessor,
-            learning_rate=agent_config["learning_rate"],
-            gamma=agent_config["gamma"],
-            epsilon_start=agent_config["epsilon_start"],
-            epsilon_end=agent_config["epsilon_end"],
-            epsilon_decay=agent_config["epsilon_decay"],
-            target_update=agent_config["target_update"],
-            memory_size=agent_config["memory_size"],
-            batch_size=agent_config["batch_size"],
-        )
-    elif args.agent_type == "DQNAgent":
-        agent = DQNAgent(
-            env=train_env,
-            observation_processor_class=TradingObservationProcessor,
-            learning_rate=agent_config["learning_rate"],
-            gamma=agent_config["gamma"],
-            epsilon_start=agent_config["epsilon_start"],
-            epsilon_end=agent_config["epsilon_end"],
-            epsilon_decay=agent_config["epsilon_decay"],
-            target_update=agent_config["target_update"],
-            memory_size=agent_config["memory_size"],
-            batch_size=agent_config["batch_size"],
-        )
-    elif args.agent_type == "PPOAgent":
-        agent = PPOAgent(
-            env=train_env,
-            observation_processor_class=TradingObservationProcessor,
-            learning_rate=agent_config["learning_rate"],
-            gamma=agent_config["gamma"],
-            gae_lambda=agent_config["gae_lambda"],
-            clip_param=agent_config["clip_param"],
-            value_loss_coef=agent_config["value_loss_coef"],
-            entropy_coef=agent_config["entropy_coef"],
-            max_grad_norm=agent_config["max_grad_norm"],
-            batch_size=agent_config["batch_size"],
-            epochs=agent_config["epochs"],
-        )
-    elif args.agent_type == "A2CAgent":
-        agent = A2CAgent(
-            env=train_env,
-            observation_processor_class=TradingObservationProcessor,
-            learning_rate=agent_config["learning_rate"],
-            gamma=agent_config["gamma"],
-            value_loss_coef=agent_config["value_loss_coef"],
-            entropy_coef=agent_config["entropy_coef"],
-            max_grad_norm=agent_config["max_grad_norm"],
-        )
+    # Create agent using factory
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent = AgentFactory.create_agent(
+        agent_type=args.agent_type,
+        env=train_env,
+        network_config=network_config,
+        interpreter_type=args.interpreter_type,
+        interpreter_config=interpreter_config,
+        device=device,
+        **agent_config
+    )
     
     # Initialize backtester
     backtester = Backtester(
@@ -375,6 +464,7 @@ def main():
         "render_train": False,
         "render_eval": False,
         "agent_type": args.agent_type,
+        "interpreter_type": args.interpreter_type,
         "data_config": {
             "raw_data_dir": "data/raw",
             "processed_data_dir": "data/processed",
@@ -405,7 +495,6 @@ def main():
         render_train=False,
         render_eval=False,
         base_dir=args.output_dir,
-        save_data_visualization=False,
     )
     
     # Save the experiment manager using pickle

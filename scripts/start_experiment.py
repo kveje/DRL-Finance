@@ -26,6 +26,9 @@ def parse_args():
     parser.add_argument("--n-episodes", type=int, default=1000000, help="Maximum number of episodes to train")
     parser.add_argument("--max-train-time", type=int, default=86400, help="Maximum training time in seconds (24h default)")
     parser.add_argument("--experiments-dir", type=str, default="experiments", help="Directory containing experiments")
+    parser.add_argument("--agent-type", type=str, 
+                        choices=["DirectionalDQNAgent", "DQNAgent", "PPOAgent", "A2CAgent", "DiscreteDQNAgent", "DDPGAgent"],
+                        help="Override the agent type from the experiment config")
     
     return parser.parse_args()
 
@@ -74,7 +77,6 @@ def main():
         # Look for config files in the config directory
         config_dir = experiment_path / "config"
         config_path = config_dir / "experiment_config.json"
-
         
         # Look for experiment_manager.py in the experiment directory
         experiment_file = experiment_path / "experiment_manager.pkl"
@@ -90,6 +92,34 @@ def main():
             if args.max_train_time:
                 experiment_manager.max_train_time = args.max_train_time
                 logger.info(f"Updated max training time to {args.max_train_time} seconds")
+            
+            # Override agent type if specified
+            if args.agent_type:
+                logger.info(f"Overriding agent type to {args.agent_type}")
+                # Get the current agent's environment
+                env = experiment_manager.train_env
+                
+                # Create new agent of specified type
+                if args.agent_type == "DDPGAgent":
+                    from models.agents.ddpg_agent import DDPGAgent
+                    agent = DDPGAgent(
+                        env=env,
+                        observation_processor_class=TradingObservationProcessor,
+                        learning_rate_actor=0.0001,
+                        learning_rate_critic=0.001,
+                        gamma=0.99,
+                        tau=0.001,
+                        memory_size=100000,
+                        batch_size=64,
+                    )
+                else:
+                    # Handle other agent types...
+                    logger.error(f"Agent type override not implemented for {args.agent_type}")
+                    return
+                
+                # Update experiment manager with new agent
+                experiment_manager.agent = agent
+                logger.info(f"Updated experiment manager with new {args.agent_type} agent")
         else:
             logger.error(f"Experiment manager file not found: {experiment_file}")
             logger.error("Please ensure that setup_experiment.py created this file")
