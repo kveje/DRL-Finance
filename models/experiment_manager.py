@@ -14,12 +14,9 @@ import shutil
 from models.backtesting import Backtester
 from models.agents.base_agent import BaseAgent
 from environments.trading_env import TradingEnv
-from visualization.trading_visualizer import TradingVisualizer
 from utils.logger import Logger, LogConfig
-from models.agents.dqn_agent import DQNAgent
-from models.agents.directional_dqn_agent import DirectionalDQNAgent
-from models.agents.ppo_agent import PPOAgent
-from models.agents.a2c_agent import A2CAgent
+
+from models.agents.agent_factory import AgentFactory
 
 # Add import for data visualization
 try:
@@ -56,7 +53,6 @@ class ExperimentManager:
         render_train: bool = False,  # Whether to render training environment
         render_eval: bool = True,  # Whether to render evaluation environment
         base_dir: str = "experiments",  # Base directory for saving experiment data
-        save_data_visualization: bool = True,  # Whether to save data visualizations
     ):
         """
         Initialize the experiment manager.
@@ -77,7 +73,6 @@ class ExperimentManager:
             render_train: Whether to render training environment
             render_eval: Whether to render evaluation environment
             base_dir: Base directory for saving experiment data
-            save_data_visualization: Whether to save data visualizations
         """
         self.experiment_name = experiment_name
         self.train_env = train_env
@@ -93,7 +88,6 @@ class ExperimentManager:
         self.metrics_to_track = metrics_to_track
         self.render_train = render_train
         self.render_eval = render_eval
-        self.save_data_visualization = save_data_visualization
         
         # Create experiment directory
         self.experiment_dir = Path(base_dir) / experiment_name
@@ -115,13 +109,10 @@ class ExperimentManager:
         self.config_dir = self.experiment_dir / "config"
         self.config_dir.mkdir(exist_ok=True)
         
-        self.visualizations_dir = self.experiment_dir / "visualizations"
-        self.visualizations_dir.mkdir(exist_ok=True)
-        
         # Create visualization directory for backtests
         if self.backtester:
             # Set visualization directory for the backtester to be within the experiment directory
-            backtest_vis_dir = self.experiment_dir / "backtest_visualizations"
+            backtest_vis_dir = self.experiment_dir / "backtest"
             backtest_vis_dir.mkdir(exist_ok=True)
             self.backtester.visualization_dir = str(backtest_vis_dir)
             self.backtester.save_visualizations = True
@@ -132,6 +123,13 @@ class ExperimentManager:
         self.metrics["episode_length"] = []
         self.metrics["timestamp"] = []
         self.metrics["eval_return"] = []
+        
+        # Add agent-specific metrics based on agent type
+        agent_type = self.agent.get_model_name()
+        agent_info = self.agent.get_info()
+        for metric in agent_info:
+            if metric not in self.metrics:
+                self.metrics[metric] = []
         
         # Initialize early stopping tracking
         self.best_eval_return = -float('inf')
@@ -146,11 +144,6 @@ class ExperimentManager:
         # Save initial setup
         self._save_config()
         self._save_data_info()
-        
-        # Generate and save data visualizations
-        if self.save_data_visualization:
-            self._save_data_visualizations()
-    
         
         self.logger.info(f"Initialized experiment: {experiment_name}")
         
@@ -255,76 +248,6 @@ class ExperimentManager:
         stats['missing_pct'] = data[numeric_cols].isnull().mean() * 100
         
         return stats
-        
-    def _save_data_visualizations(self):
-        """Generate and save visualizations of the training and validation data."""
-        if not _HAS_VISUALIZATION:
-            self.logger.warning("DataVisualization not available. Skipping data visualizations.")
-            return
-            
-        self.logger.info("Generating data visualizations...")
-        
-        # Create data visualization object
-        visualizer = DataVisualization(save_dir=str(self.visualizations_dir))
-        
-        # Generate visualizations for training data
-        train_vis_prefix = "train_data"
-        visualizer.visualize_all(
-            raw_data=self.train_env.raw_data,
-            processed_data=self.train_env.processed_data,
-            columns=None,  # Use all numeric columns
-            time_series_columns=["close", "volume"],
-            tickers=self.train_env.processed_data["ticker"].unique().tolist(),
-            output_prefix=train_vis_prefix
-        )
-        
-        # Generate visualizations for validation data
-        val_vis_prefix = "val_data"
-        visualizer.visualize_all(
-            raw_data=self.val_env.raw_data,
-            processed_data=self.val_env.processed_data,
-            columns=None,  # Use all numeric columns
-            time_series_columns=["close", "volume"],
-            tickers=self.val_env.processed_data["ticker"].unique().tolist(),
-            output_prefix=val_vis_prefix
-        )
-        
-        # Generate comparison between training and validation data
-        self._generate_train_val_comparison(visualizer)
-        
-        self.logger.info(f"Saved data visualizations to {self.visualizations_dir}")
-        
-    def _generate_train_val_comparison(self, visualizer: Any):
-        """Generate visualizations comparing training and validation data."""
-        # Extract key tickers to compare (use the first ticker if multiple exist)
-        train_tickers = self.train_env.processed_data["ticker"].unique()
-        val_tickers = self.val_env.processed_data["ticker"].unique()
-        
-        # Find common tickers
-        common_tickers = list(set(train_tickers) & set(val_tickers))
-        
-        if not common_tickers:
-            self.logger.warning("No common tickers between training and validation data")
-            return
-            
-        # Select the first common ticker for comparison
-        ticker = common_tickers[0]
-        
-        # Filter data for the selected ticker
-        train_ticker_data = self.train_env.processed_data[self.train_env.processed_data["ticker"] == ticker]
-        val_ticker_data = self.val_env.processed_data[self.val_env.processed_data["ticker"] == ticker]
-        
-        # Create a figure for price comparison
-        plt.figure(figsize=(12, 6))
-        plt.plot(train_ticker_data["date"], train_ticker_data["close"], label="Training")
-        plt.plot(val_ticker_data["date"], val_ticker_data["close"], label="Validation")
-        plt.title(f"Price Comparison: {ticker}")
-        plt.xlabel("Date")
-        plt.ylabel("Price")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.visualizations_dir / f"train_val_price_comparison_{ticker}.png")
-        plt.close()
     
     def train(self, n_episodes: int = 10000):
         """
@@ -428,35 +351,72 @@ class ExperimentManager:
         episode_reward = 0
         episode_steps = 0
         episode_loss = []
-        episode_epsilon = []
+        episode_metrics = {}
         done = False
+        
+        # Get agent type to handle different update patterns
+        agent_type = self.agent.get_model_name().lower()
         
         # Run episode
         while not done:
             # Select action
-            intended_action = self.agent.get_intended_action(
+            intended_action, action_choice = self.agent.get_intended_action(
                 observation, 
-                current_position=self.train_env.get_current_position()
+                current_position=self.train_env.get_current_position(),
+                deterministic=False  # Allow exploration during training
             )
             
             # Take action in environment
             next_observation, reward, done, info = self.train_env.step(intended_action)
             
-            # Store experience
-            self.agent.add_to_memory(
-                observation=observation,
-                action=intended_action,
-                reward=reward,
-                next_observation=next_observation,
-                done=done
-            )
+            # Handle different agent types differently
+            if agent_type == "a2c":
+                # A2C uses a different update pattern (on-policy)
+                self.agent.add_to_rollout(
+                    observation=observation,
+                    action=intended_action,
+                    action_choice=action_choice,
+                    reward=reward,
+                    next_observation=next_observation,
+                    done=done
+                )
+            elif agent_type == "ddpg":
+                # DDPG uses experience replay
+                self.agent.add_to_memory(
+                    observation=observation,
+                    action=intended_action,
+                    action_choice=action_choice,
+                    reward=reward,
+                    next_observation=next_observation,
+                    done=done
+                )
+                
+                # Update DDPG if enough samples
+                if len(self.agent.memory) >= self.agent.batch_size:
+                    update_metrics = self.agent.update()
+                    episode_loss.append(update_metrics.get("actor_loss", 0))
+                    # Store all metrics for later use
+                    for k, v in update_metrics.items():
+                        episode_metrics[k] = episode_metrics.get(k, []) + [v]
+            else:
+                # DQN-style agents use experience replay
+                self.agent.add_to_memory(
+                    observation=observation,
+                    action=intended_action,
+                    action_choice=action_choice,
+                    reward=reward,
+                    next_observation=next_observation,
+                    done=done
+                )
 
-            # Update agent if enough samples
-            if len(self.agent.memory) >= self.agent.batch_size:
-                batch = self.agent.get_batch()
-                update_metrics = self.agent.update(batch)
-                episode_loss.append(update_metrics["loss"])
-                episode_epsilon.append(update_metrics["epsilon"])
+                # Update DQN-style agents if enough samples
+                if hasattr(self.agent, 'memory') and hasattr(self.agent, 'batch_size') and len(self.agent.memory) >= self.agent.batch_size:
+                    batch = self.agent.get_batch()
+                    update_metrics = self.agent.update(batch)
+                    episode_loss.append(update_metrics.get("loss", 0))
+                    # Store all metrics for later use
+                    for k, v in update_metrics.items():
+                        episode_metrics[k] = episode_metrics.get(k, []) + [v]
             
             # Update visualization if enabled
             if self.render_train:
@@ -470,6 +430,12 @@ class ExperimentManager:
             observation = next_observation
             self.total_steps += 1
         
+        # For A2C, update at the end of episode
+        if agent_type == "a2c":
+            update_metrics = self.agent.update()
+            for k, v in update_metrics.items():
+                episode_metrics[k] = [v]  # Store as single-item list for consistency
+        
         # Calculate final portfolio value
         final_portfolio_value = info["portfolio_value"]
         
@@ -482,10 +448,14 @@ class ExperimentManager:
             "timestamp": time.time()
         }
         
-        # Add loss and epsilon if available
-        if episode_loss:
-            metrics["loss"] = np.mean(episode_loss)
-            metrics["epsilon"] = episode_epsilon[-1]
+        # Add metrics from update if available
+        for metric_name, values in episode_metrics.items():
+            if values:
+                metrics[metric_name] = np.mean(values)
+        
+        # Get additional info from the agent
+        agent_info = self.agent.get_info()
+        metrics.update(agent_info)
         
         return metrics
     
@@ -513,10 +483,10 @@ class ExperimentManager:
             
             while not done:
                 # Get deterministic action
-                intended_action = self.agent.get_intended_action(
+                intended_action, _ = self.agent.get_intended_action(
                     observation, 
                     current_position=self.val_env.get_current_position(),
-                    deterministic=True
+                    deterministic=True  # Always use deterministic actions during evaluation
                 )
                 
                 # Take action
@@ -536,7 +506,7 @@ class ExperimentManager:
         # Run full backtest if backtester is available
         if self.backtester:
             # Make sure backtester visualization directory is set correctly
-            backtest_vis_dir = self.experiment_dir / "backtest_visualizations"
+            backtest_vis_dir = self.experiment_dir / "backtest"
             backtest_vis_dir.mkdir(exist_ok=True)
             self.backtester.visualization_dir = str(backtest_vis_dir)
             self.backtester.save_visualizations = True
@@ -644,8 +614,12 @@ class ExperimentManager:
             new_metrics: Dictionary with new metric values
         """
         for metric, value in new_metrics.items():
-            if metric in self.metrics:
-                self.metrics[metric].append(value)
+            # Add the metric to tracking if it's not already being tracked
+            if metric not in self.metrics:
+                self.metrics[metric] = []
+                
+            # Add the value to the metric list
+            self.metrics[metric].append(value)
     
     def _check_early_stopping(self, eval_return: float) -> bool:
         """
@@ -691,23 +665,49 @@ class ExperimentManager:
         recent_metrics = {metric: self.metrics[metric][-1] if self.metrics[metric] else None 
                          for metric in self.metrics_to_track if metric in self.metrics}
         
-        # Save the model
-        torch.save({
-            'episode': episode,
-            'total_steps': self.total_steps,
-            'model_state_dict': self.agent.get_model().state_dict(),
-            'optimizer_state_dict': self.agent.optimizer.state_dict(),
-            'metrics': recent_metrics,
-            'training_time': time.time() - self.start_time,
-            'timestamp': datetime.now().isoformat()
-        }, save_path)
+        # Get agent type
+        agent_type = self.agent.get_model_name().lower()
+        
+        # Save the model based on agent type
+        if agent_type == "ddpg":
+            torch.save({
+                'episode': episode,
+                'total_steps': self.total_steps,
+                'actor_state_dict': self.agent.actor.state_dict(),
+                'critic_state_dict': self.agent.critic.state_dict(),
+                'actor_target_state_dict': self.agent.actor_target.state_dict(),
+                'critic_target_state_dict': self.agent.critic_target.state_dict(),
+                'actor_optimizer_state_dict': self.agent.actor_optimizer.state_dict(),
+                'critic_optimizer_state_dict': self.agent.critic_optimizer.state_dict(),
+                'metrics': recent_metrics,
+                'training_time': time.time() - self.start_time,
+                'timestamp': datetime.now().isoformat()
+            }, save_path)
+        else:
+            # Original save logic for other agents
+            torch.save({
+                'episode': episode,
+                'total_steps': self.total_steps,
+                'model_state_dict': self.agent.get_model().state_dict(),
+                'optimizer_state_dict': self.agent.optimizer.state_dict(),
+                'metrics': recent_metrics,
+                'training_time': time.time() - self.start_time,
+                'timestamp': datetime.now().isoformat()
+            }, save_path)
         
         self.logger.info(f"Saved model to {save_path}")
     
     def _save_metrics(self):
         """Save training metrics to disk."""
         # Ensure all lists have the same length by padding shorter lists with None
-        max_length = max(len(values) for values in self.metrics.values() if len(values) > 0)
+        non_empty_metrics = {k: v for k, v in self.metrics.items() if len(v) > 0}
+        
+        # If there are no metrics, return early
+        if not non_empty_metrics:
+            self.logger.warning("No metrics to save. Skipping metrics save.")
+            return
+            
+        max_length = max(len(values) for values in non_empty_metrics.values())
         padded_metrics = {}
         
         for key, values in self.metrics.items():
@@ -934,11 +934,6 @@ class ExperimentManager:
         """
         from data.data_manager import DataManager
         from environments.trading_env import TradingEnv
-        from models.agents.dqn_agent import DQNAgent
-        from models.agents.directional_dqn_agent import DirectionalDQNAgent
-        from models.agents.ppo_agent import PPOAgent
-        from models.agents.a2c_agent import A2CAgent
-        from models.processors.trading_processor import TradingObservationProcessor
         from models.backtesting import Backtester
         import pandas as pd
         
@@ -1143,65 +1138,33 @@ class ExperimentManager:
         )
         
         # Create agent based on type
-        exp_logger.info("Recreating agent and loading model weights...")
-        agent_type = config.get("agent_type", "DirectionalDQNAgent")
+        exp_logger.info(f"Recreating agent and loading model weights...")
+        agent_type = config.get("agent_type", "dqn").lower()  # Convert to lowercase for factory
         
-        if agent_type == "DirectionalDQNAgent":
-            agent = DirectionalDQNAgent(
-                env=train_env,
-                observation_processor_class=TradingObservationProcessor,
-                learning_rate=agent_config.get("learning_rate", 0.001),
-                gamma=agent_config.get("gamma", 0.99),
-                epsilon_start=agent_config.get("epsilon", 0.01),  # Continue with low exploration
-                epsilon_end=agent_config.get("epsilon_end", 0.01),
-                epsilon_decay=agent_config.get("epsilon_decay", 0.999),
-                target_update=agent_config.get("target_update", 10),
-                memory_size=agent_config.get("memory_size", 10000),
-                batch_size=agent_config.get("batch_size", 256),
-            )
-        elif agent_type == "DQNAgent":
-            agent = DQNAgent(
-                env=train_env,
-                observation_processor_class=TradingObservationProcessor,
-                learning_rate=agent_config.get("learning_rate", 0.001),
-                gamma=agent_config.get("gamma", 0.99),
-                epsilon_start=agent_config.get("epsilon", 0.01),  # Continue with low exploration
-                epsilon_end=agent_config.get("epsilon_end", 0.01),
-                epsilon_decay=agent_config.get("epsilon_decay", 0.999),
-                target_update=agent_config.get("target_update", 10),
-                memory_size=agent_config.get("memory_size", 10000),
-                batch_size=agent_config.get("batch_size", 256),
-            )
-        elif agent_type == "PPOAgent":
-            agent = PPOAgent(
-                env=train_env,
-                observation_processor_class=TradingObservationProcessor,
-                learning_rate=agent_config.get("learning_rate", 0.0003),
-                gamma=agent_config.get("gamma", 0.99),
-                gae_lambda=agent_config.get("gae_lambda", 0.95),
-                clip_param=agent_config.get("clip_param", 0.2),
-                value_loss_coef=agent_config.get("value_loss_coef", 0.5),
-                entropy_coef=agent_config.get("entropy_coef", 0.01),
-                max_grad_norm=agent_config.get("max_grad_norm", 0.5),
-                batch_size=agent_config.get("batch_size", 64),
-                epochs=agent_config.get("epochs", 10),
-            )
-        elif agent_type == "A2CAgent":
-            agent = A2CAgent(
-                env=train_env,
-                observation_processor_class=TradingObservationProcessor, 
-                learning_rate=agent_config.get("learning_rate", 0.0007),
-                gamma=agent_config.get("gamma", 0.99),
-                value_loss_coef=agent_config.get("value_loss_coef", 0.5),
-                entropy_coef=agent_config.get("entropy_coef", 0.01),
-                max_grad_norm=agent_config.get("max_grad_norm", 0.5),
-            )
-        else:
-            raise ValueError(f"Unsupported agent type: {agent_type}")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Create agent using factory
+        agent = AgentFactory.create_agent(
+            agent_type=agent_type,
+            env=train_env,
+            network_config=agent_config.get("network_config", {}),
+            interpreter_type=agent_config.get("interpreter_type", "discrete"),
+            interpreter_config=agent_config.get("interpreter_config", {}),
+            device=device,
+            **agent_config
+        )
         
         # Load model weights
-        agent.get_model().load_state_dict(checkpoint["model_state_dict"])
-        agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if agent_type == "ddpg":
+            agent.actor.load_state_dict(checkpoint["actor_state_dict"])
+            agent.critic.load_state_dict(checkpoint["critic_state_dict"])
+            agent.actor_target.load_state_dict(checkpoint["actor_target_state_dict"])
+            agent.critic_target.load_state_dict(checkpoint["critic_target_state_dict"])
+            agent.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+            agent.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+        else:
+            agent.get_model().load_state_dict(checkpoint["model_state_dict"])
+            agent.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         
         # Initialize backtester
         backtester = Backtester(
@@ -1210,7 +1173,7 @@ class ExperimentManager:
             asset_names=tickers,
             visualizer=None,
             save_visualizations=True,
-            visualization_dir=os.path.join(experiment_dir, "backtest_visualizations")
+            visualization_dir=os.path.join(experiment_dir, "backtest")
         )
         
         # Create a new experiment manager
@@ -1231,8 +1194,6 @@ class ExperimentManager:
             render_train=config.get("render_train", False),
             render_eval=config.get("render_eval", False),
             base_dir=os.path.dirname(experiment_dir),
-            save_data_visualization=False,  # Skip initial visualization on continuation
-            save_data_snapshots=False,      # Skip data snapshots on continuation
         )
         
         # Set the current episode to continue from where we left off
