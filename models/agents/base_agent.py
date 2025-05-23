@@ -5,7 +5,8 @@ from environments.base_env import BaseTradingEnv
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-from ..networks.base_network import BaseNetwork
+from ..networks.unified_network import UnifiedNetwork
+from ..action_interpreters.base_action_interpreter import BaseActionInterpreter
 
 class BaseAgent(ABC):
     """
@@ -15,8 +16,9 @@ class BaseAgent(ABC):
     
     def __init__(
         self,
-        state_dim: int,
-        action_dim: int,
+        env: BaseTradingEnv,
+        network_config: Dict[str, Any],
+        interpreter: BaseActionInterpreter,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         **kwargs
     ):
@@ -24,25 +26,39 @@ class BaseAgent(ABC):
         Initialize the base agent.
         
         Args:
-            state_dim: Dimension of the state space
-            action_dim: Dimension of the action space
+            env: Trading environment instance
+            network_config: Configuration for the unified network
+            interpreter: Action interpreter instance to use
             device: Device to run the agent on
             **kwargs: Additional arguments specific to the agent implementation
         """
-        self.state_dim = state_dim
-        self.action_dim = action_dim
+        self.env = env
         self.device = device
+        self.interpreter = interpreter
+        
+        # Initialize unified network
+        self.network = UnifiedNetwork(network_config, device=device)
+        
+        # Store network configuration
+        self.network_config = network_config
     
     @abstractmethod
-    def get_intended_action(self, **kwargs) -> np.ndarray:
+    def get_intended_action(
+        self,
+        observations: Dict[str, torch.Tensor],
+        current_position: np.ndarray,
+        deterministic: bool = True
+    ) -> np.ndarray:
         """
         Select an action based on the current state.
         
         Args:
-            **kwargs: Additional arguments specific to the agent implementation
+            observations: Dictionary of observation tensors for each processor
+            current_position: Current position of the agent
+            deterministic: Whether to use deterministic action selection
             
         Returns:
-            Selected action
+            Selected action array
         """
         pass
     
@@ -79,24 +95,25 @@ class BaseAgent(ABC):
         """
         pass
     
-    @abstractmethod
     def train(self) -> None:
         """Set the agent's networks to training mode."""
-        pass
+        self.network.train()
     
-    @abstractmethod
     def eval(self) -> None:
         """Set the agent's networks to evaluation mode."""
-        pass
-
-    @abstractmethod
-    def get_model(self):
-        pass
-
-    @abstractmethod
-    def get_model_name(self):
-        pass
-
-    @abstractmethod
-    def get_config(self):
-        pass
+        self.network.eval()
+    
+    def get_model(self) -> UnifiedNetwork:
+        """Get the unified network instance."""
+        return self.network
+    
+    def get_model_name(self) -> str:
+        """Get the name of the agent's model."""
+        return self.__class__.__name__
+    
+    def get_config(self) -> Dict[str, Any]:
+        """Get the agent's configuration."""
+        return {
+            "network_config": self.network_config,
+            "device": self.device
+        }
