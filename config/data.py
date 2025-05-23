@@ -16,27 +16,27 @@ TRADE_END_DATE = "2025-03-27"
 
 # Indicator Parameters
 INDICATOR_PARAMS = {
-    # "sma": {"windows": [5, 10, 20, 50]},
-    # "ema": {"windows": [5, 10, 20, 50]},
+    "sma": {"windows": [5, 10, 20, 50]},
+    "ema": {"windows": [5, 10, 20, 50]},
     "rsi": {"window": 14},
     "macd": {"fast": 12, "slow": 26, "signal": 9},
-    "bb": {"window": 20, "num_std": 2},
+    "bollinger": {"window": 20, "num_std": 2},
     "atr": {"window": 14},
     "obv": {},
     "adx": {"window": 14},
     "cci": {"window": 20},
     "stoch": {"k_window": 14, "d_window": 3},
-    # "mfi": {"window": 14},
-    # "roc": {"window": 12},
-    # "williams_r": {"window": 14},
-    # "vwap": {"reset_period": "daily"},
-    # "ichimoku": {
-    #     "tenkan_window": 9,
-    #     "kijun_window": 26,
-    #     "senkou_span_b_window": 52,
-    #     "displacement": 26,
-    # },
-    # "keltner": {"ema_window": 20, "atr_window": 10, "multiplier": 2},
+    "mfi": {"window": 14},
+    "roc": {"window": 12},
+    "williams_r": {"window": 14},
+    "vwap": {"reset_period": "daily"},
+    "ichimoku": {
+        "tenkan_window": 9,
+        "kijun_window": 26,
+        "senkou_span_b_window": 52,
+        "displacement": 26,
+    },
+    "keltner": {"ema_window": 20, "atr_window": 10, "multiplier": 2},
     "linreg": {"window": 10},
 }
 

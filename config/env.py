@@ -3,8 +3,7 @@
 import numpy as np
 ENV_PARAMS = {
     "initial_capital": 100000,
-    "transaction_fee_percent": 0.001,
-    "window_size": 10,
+    "window_size": 3,
 }
 
 MARKET_FRIC_PARAMS = {
@@ -20,7 +19,7 @@ MARKET_FRIC_PARAMS = {
 CONSTRAINT_PARAMS = {
     'position_limits': {
         'min': 0,
-        'max': 10000
+        'max': 100
     },
     'cash_limit': {
         'min': 0,
@@ -40,5 +39,3 @@ REWARD_PARAMS = {
         "scale": 1.0
     }),
 }
-
-
