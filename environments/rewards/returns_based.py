@@ -42,8 +42,9 @@ class ReturnsBasedReward(BaseReward):
         portfolio_return = (
             portfolio_value - previous_portfolio_value
         ) / previous_portfolio_value
-
-        return portfolio_return * self.scale # Scale the reward
+        # Log-transform the reward
+        log_portfolio_return = np.log(portfolio_return + 1)
+        return log_portfolio_return * self.scale # Scale the reward
 
     def __str__(self) -> str:
         """Return a string representation of the reward function."""
