@@ -85,42 +85,36 @@ class TradingVisualizer:
         self.portfolio_ax.set_xlabel('Time')
         self.portfolio_ax.set_ylabel('Value ($)')
         self.portfolio_ax.grid(True)
-        self.portfolio_ax.legend()
         
         # Positions plot
         self.positions_ax.set_title('Asset Positions')
         self.positions_ax.set_xlabel('Time')
         self.positions_ax.set_ylabel('Position Size')
         self.positions_ax.grid(True)
-        self.positions_ax.legend()
         
         # Cash plot
         self.cash_ax.set_title('Cash Balance')
         self.cash_ax.set_xlabel('Time')
         self.cash_ax.set_ylabel('Cash ($)')
         self.cash_ax.grid(True)
-        self.cash_ax.legend()
         
         # Actions plot
         self.actions_ax.set_title('Trading Actions')
         self.actions_ax.set_xlabel('Time')
         self.actions_ax.set_ylabel('Action Value')
         self.actions_ax.grid(True)
-        self.actions_ax.legend()
         
         # Rewards plot
         self.returns_ax.set_title('Returns Over Time')
         self.returns_ax.set_xlabel('Time')
         self.returns_ax.set_ylabel('Returns %')
         self.returns_ax.grid(True)
-        self.returns_ax.legend()
         
         # Loss plot
         self.loss_ax.set_title('Training Loss')
         self.loss_ax.set_xlabel('Time')
         self.loss_ax.set_ylabel('Loss')
         self.loss_ax.grid(True)
-        self.loss_ax.legend()
         
         # Metrics plot
         self.metrics_ax.set_title('Training Metrics')
@@ -328,7 +322,6 @@ class TradingVisualizer:
         portfolio_ax.set_xlabel('Time Step')
         portfolio_ax.set_ylabel('Value ($)')
         portfolio_ax.grid(True)
-        portfolio_ax.legend()
         
         # Plot positions - be extra careful here to show all data correctly
         if positions_array is not None and positions_array.size > 0:
@@ -354,7 +347,6 @@ class TradingVisualizer:
         positions_ax.set_xlabel('Time Step')
         positions_ax.set_ylabel('Position Size')
         positions_ax.grid(True)
-        positions_ax.legend()
         
         # Plot cash (if available)
         cash = []
@@ -390,7 +382,6 @@ class TradingVisualizer:
             cash_ax.set_xlabel('Time Step')
             cash_ax.set_ylabel('Cash ($)')
             cash_ax.grid(True)
-            cash_ax.legend()
         
         # Plot actions
         if actions_array is not None and actions_array.size > 0:
@@ -412,7 +403,6 @@ class TradingVisualizer:
         actions_ax.set_xlabel('Time Step')
         actions_ax.set_ylabel('Action Value')
         actions_ax.grid(True)
-        actions_ax.legend()
         
         # Plot portfolio returns and asset-specific returns if available
         if isinstance(returns, np.ndarray) and returns.size > 0:
@@ -452,7 +442,6 @@ class TradingVisualizer:
         returns_ax.set_xlabel('Time Step')
         returns_ax.set_ylabel('Returns %')
         returns_ax.grid(True)
-        returns_ax.legend()
         
         # Plot metrics - e.g., rewards and any other metrics
         if isinstance(rewards, np.ndarray) and rewards.size > 0:
