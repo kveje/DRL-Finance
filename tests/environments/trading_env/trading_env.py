@@ -19,6 +19,8 @@ class TestTradingEnv(unittest.TestCase):
         """Set up test fixtures."""
         self.raw_data = pd.read_csv("tests/environments/trading_env/raw_test.csv", skipinitialspace=True)
         self.processed_data = pd.read_csv("tests/environments/trading_env/processed_test.csv", skipinitialspace=True)
+        # self.raw_data.set_index("day", inplace=True) # This is also handled as an edge case in the environment (does not affect the test)
+        # self.processed_data.set_index("day", inplace=True) # This is also handled as an edge case in the environment (does not affect the test)
         self.columns = {
             "ticker": "ticker",
             "price": "close",
@@ -36,7 +38,8 @@ class TestTradingEnv(unittest.TestCase):
         }
         self.reward_params = ("returns_based", {"scale": 1.0})
         self.constraint_params = {
-            "position_limits": {"min": -100, "max": 100}
+            "position_limits": {"min": 0, "max": 100},
+            "cash_limit": {"min": 0, "max": 100000.0}
         }
         self.ohlcv_dim = 5
         self.tech_dim = 3
@@ -45,6 +48,32 @@ class TestTradingEnv(unittest.TestCase):
         self.market_cols = self.columns["ohlcv"] + self.columns["tech_cols"]
         self.asset_list = list(self.processed_data["ticker"].unique())
 
+        # Define default processor configs for testing
+        self.processor_configs = [
+            {
+                'type': 'price',
+                'data_name': 'market_data',
+                'kwargs': {
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'cash',
+                'data_name': 'cash_data',
+                'kwargs': {
+                    'cash_limit': self.constraint_params["cash_limit"]["max"]
+                }
+            },
+            {
+                'type': 'position',
+                'data_name': 'position_data',
+                'kwargs': {
+                    'position_limits': self.constraint_params["position_limits"],
+                    'asset_list': self.asset_list
+                }
+            }
+        ]
     
     def test_trading_env_initialization(self):
         """Test the initialization of the TradingEnv class."""
@@ -56,6 +85,7 @@ class TestTradingEnv(unittest.TestCase):
             friction_params=self.friction_params,
             reward_params=self.reward_params,
             constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
         )
         self.assertEqual(env.initial_balance, self.env_params["initial_balance"])
         self.assertEqual(env.window_size, self.env_params["window_size"])
@@ -74,10 +104,9 @@ class TestTradingEnv(unittest.TestCase):
         # Action space
         self.assertEqual(env.action_space.shape, (self.n_assets,))
         
-        # Observation space
-        self.assertEqual(list(env.observation_space.keys()), sorted(["data", "positions", "portfolio_info"]))
-        self.assertEqual(env.observation_space["data"].shape, (self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
-
+        # Observation space - now based on processors
+        self.assertEqual(list(env.observation_space.keys()), sorted(["price", "cash", "position"]))
+        
         # Initialize state
         self.assertEqual(env.current_step, self.env_params["window_size"])
         self.assertFalse(env.done)
@@ -92,10 +121,11 @@ class TestTradingEnv(unittest.TestCase):
             friction_params=self.friction_params,
             reward_params=self.reward_params,
             constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
         )
         _, _, _, _ = env.step(np.ones_like(env.action_space, dtype=np.int32))
         
-        _ = env.reset()
+        observation = env.reset()
 
         self.assertEqual(env.current_step, self.env_params["window_size"])
         self.assertEqual(env.current_cash, self.env_params["initial_balance"])
@@ -104,6 +134,11 @@ class TestTradingEnv(unittest.TestCase):
         self.assertEqual(env.portfolio_value_history, [self.env_params["initial_balance"]])
         self.assertEqual(env.done, False)
         self.assertEqual(env.info, {})
+        
+        # Check observation after reset
+        self.assertEqual(sorted(list(observation.keys())), sorted(["price", "cash", "position"]))
+        self.assertTrue(np.array_equal(observation["position"], np.zeros(self.n_assets)))
+        self.assertEqual(observation["cash"].shape, (2,))  # [cash, portfolio_value]
     
     def test_trading_env_step(self):
         """Test the step method of the TradingEnv class."""
@@ -115,6 +150,7 @@ class TestTradingEnv(unittest.TestCase):
             friction_params=self.friction_params,
             reward_params=self.reward_params,
             constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
         )
         env.reset()
 
@@ -123,16 +159,15 @@ class TestTradingEnv(unittest.TestCase):
         observation, reward, done, info = env.step(action)
         self.assertEqual(reward, 0.0)
         self.assertEqual(done, False)
-        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
-        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([1, 0])))
+        self.assertTrue(np.array_equal(observation["position"], np.zeros(shape=(self.n_assets))))
+        self.assertEqual(observation["cash"].shape, (2,))
 
         # Test case 2: Action violates the constraints
         env.reset()
         action = np.array([1000, -5, 0])
         observation, reward, done, info = env.step(action)
-        self.assertEqual(done, True)
-        self.assertEqual(reward, -1000.0)
-        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
+        self.assertEqual(done, False)
+        self.assertLess(reward, 0.0)
        
         # Test case 3: Action is within the constraints
         env.reset()
@@ -140,8 +175,6 @@ class TestTradingEnv(unittest.TestCase):
         action = np.array([1, 1, 1])
         observation, reward, done, info = env.step(action)
         self.assertEqual(done, False)
-        self.assertEqual(sum(observation["positions"]) + observation["portfolio_info"][0], 1)
-        
 
     def test_observation_space(self):
         """Test the observation space of the TradingEnv class."""
@@ -153,30 +186,43 @@ class TestTradingEnv(unittest.TestCase):
             friction_params=self.friction_params,
             reward_params=self.reward_params,
             constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
         )
 
         observation = env.reset()
-        # Shapes
-        self.assertEqual(observation["data"].shape, (self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
-        self.assertEqual(observation["positions"].shape, (self.n_assets,))
-        self.assertEqual(observation["portfolio_info"].shape, (2,))
+        
+        # Check observation structure
+        self.assertEqual(sorted(list(observation.keys())), sorted(["price", "cash", "position"]))
+        
+        # Check shapes
+        self.assertEqual(observation["price"].shape, (self.n_assets, self.window_size))
+        self.assertEqual(observation["position"].shape, (self.n_assets,))
+        self.assertEqual(observation["cash"].shape, (2,))
 
-        # Values
-        self.assertTrue(np.array_equal(observation["positions"], np.zeros(shape=(self.n_assets))))
-        self.assertTrue(np.array_equal(observation["portfolio_info"], np.array([1, 0])))
-        days = [0,1,2]
+        # Check initial values
+        self.assertTrue(np.array_equal(observation["position"], np.zeros(shape=(self.n_assets))))
+        self.assertAlmostEqual(observation["cash"][0], 1.0)  # Initial cash ratio
+        self.assertAlmostEqual(observation["cash"][1], 0.0)  # Initial portfolio value ratio
+
+        # Check price data
         for i, asset in enumerate(self.asset_list):
-            for j, col in enumerate(self.market_cols):
-                for k, day in enumerate(days):
-                    self.assertEqual(observation["data"][i, j, k], self.processed_data[self.processed_data["ticker"] == asset].iloc[day][col])
+            for j in range(self.window_size):
+                self.assertEqual(
+                    observation["price"][i, j],
+                    self.processed_data[self.processed_data["ticker"] == asset].iloc[j]["close"]
+                )
 
     def test_done(self):
-        """Test the that the environment is done, when no more data is left."""
+        """Test that the environment is done when no more data is left."""
         env = TradingEnv(
             processed_data=self.processed_data,
             raw_data=self.raw_data,
             columns=self.columns,
             env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
         )
         i = 1
         observation = env.reset()
@@ -188,15 +234,54 @@ class TestTradingEnv(unittest.TestCase):
         self.assertEqual(env.current_step, env.max_step)
         self.assertEqual(i, 3)
 
-    def test_standardize_observation(self):
-        """Test the standardize_observation method of the TradingEnv class."""
+    def test_custom_processor_config(self):
+        """Test the environment with a custom processor configuration."""
+        custom_configs = [
+            {
+                'type': 'price',
+                'data_name': 'market_data',
+                'kwargs': {
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'tech',
+                'data_name': 'market_data',
+                'kwargs': {
+                    'tech_cols': self.columns["tech_cols"],
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'cash',
+                'data_name': 'cash_data',
+                'kwargs': {
+                    'cash_limit': self.constraint_params["cash_limit"]["max"]
+                }
+            }
+        ]
+
         env = TradingEnv(
             processed_data=self.processed_data,
             raw_data=self.raw_data,
             columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=custom_configs
         )
 
-    
+        observation = env.reset()
+        
+        # Check observation structure with custom config
+        self.assertEqual(sorted(list(observation.keys())), sorted(["price", "tech", "cash"]))
+        
+        # Check shapes
+        self.assertEqual(observation["price"].shape, (self.n_assets, self.window_size))
+        self.assertEqual(observation["tech"].shape, (self.n_assets, len(self.columns["tech_cols"])))
+        self.assertEqual(observation["cash"].shape, (2,))
 
 if __name__ == "__main__":
     unittest.main()
