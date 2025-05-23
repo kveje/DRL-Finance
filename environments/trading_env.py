@@ -14,6 +14,7 @@ from .rewards import RewardManager
 from .market_friction import MarketFrictionManager
 from .constraints import ConstraintManager
 from visualization.trading_visualizer import TradingVisualizer
+from .processors.composite_processor import CompositeProcessor
 
 class TradingEnv(BaseTradingEnv):
     """
@@ -31,6 +32,7 @@ class TradingEnv(BaseTradingEnv):
         friction_params: Dict[str, Dict[str, float]] = {}, # {slippage: {slippage_mean: 0.0, slippage_std: 0.001}, commission: {commission_rate: 0.001}}
         reward_params: Tuple[str, Dict[str, Any]] = ("returns_based", {"scale": 1.0}), # (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
         constraint_params: Dict[str, Dict[str, float]] = {}, # {position_limits: {min: -1000, max: 1000}}
+        processor_configs: List[Dict[str, Any]] = None, # List of processor configurations
         seed: Optional[int] = None,
         render_mode: Optional[str] = None,
     ):
@@ -44,6 +46,7 @@ class TradingEnv(BaseTradingEnv):
             friction_params: Dictionary of friction parameters (slippage, commission, etc.)
             reward_params: Tuple of (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
             constraint_params: Dictionary of constraint parameters (position_limits, etc.)
+            processor_configs: List of processor configurations for the observation space
             seed: Random seed for reproducibility
             render_mode: Mode for rendering, options are "human" for visualization or None
         """
@@ -51,9 +54,6 @@ class TradingEnv(BaseTradingEnv):
         
         logger.info(f"Initializing TradingEnv")
 
-        # Data setup
-        self.processed_data: pd.DataFrame = processed_data
-        self.raw_data: pd.DataFrame = raw_data
 
         # Data columns setup
         self.tic_col: str = columns.get("ticker", "ticker")
@@ -63,11 +63,24 @@ class TradingEnv(BaseTradingEnv):
         self.tech_cols: List[str] = columns.get("tech_cols", [])
         self.market_cols: List[str] = self.ohlcv_cols + self.tech_cols
 
+        # Data setup - ensure day is the index
+        if processed_data.index.name != self.day_col:
+            logger.info(f"Setting {self.day_col} as index for processed_data")
+            self.processed_data: pd.DataFrame = processed_data.set_index(self.day_col)
+        else:
+            self.processed_data: pd.DataFrame = processed_data
+
+        if raw_data.index.name != self.day_col:
+            logger.info(f"Setting {self.day_col} as index for raw_data")
+            self.raw_data: pd.DataFrame = raw_data.set_index(self.day_col)
+        else:
+            self.raw_data: pd.DataFrame = raw_data
+
         # Save columns
         self.columns = columns
 
         # Get max step
-        self.max_step = self.processed_data[self.day_col].max()
+        self.max_step = self.processed_data.index.max()
 
         # Asset setup
         self.asset_list: List[str] = list(processed_data[self.tic_col].unique()) # List of asset tickers
@@ -96,7 +109,7 @@ class TradingEnv(BaseTradingEnv):
         self.constraint_params = constraint_params
         self.reward_params = reward_params
 
-        # Get limits from constraints (for standardization)
+        # Get limits from constraints (for scaling)
         self.limits = {constraint: self.constraint_manager.get_parameters(constraint) for constraint in self.constraint_manager.constraints}
 
         # Define action space (Action is the number of shares to buy or sell for each asset)
@@ -108,30 +121,39 @@ class TradingEnv(BaseTradingEnv):
             dtype=np.int32,
         )
 
-        # Define observation space
-        # [Normalized OHLCV data for window_size steps] + [technical indicators] + [current positions] + [current cash] + [portfolio value]
-        self.ohlcv_dim = len(self.ohlcv_cols)
-        self.tech_dim = len(self.tech_cols)
-        self.portfolio_info_dim = 2
+        # Initialize the composite processor
+        if processor_configs is None:
+            # Default processor configuration if none provided
+            processor_configs = [
+                {
+                    'type': 'price',
+                    'data_name': 'market_data',
+                    'kwargs': {
+                        'window_size': self.window_size,
+                        'asset_list': self.asset_list
+                    }
+                },
+                {
+                    'type': 'cash',
+                    'data_name': 'cash_data',
+                    'kwargs': {
+                        'cash_limit': self.constraint_manager.get_parameters("cash_limit")["max"]
+                    }
+                },
+                {
+                    'type': 'position',
+                    'data_name': 'position_data',
+                    'kwargs': {
+                        'position_limits': self.constraint_manager.get_parameters("position_limits"),
+                        'asset_list': self.asset_list
+                    }
+                }
+            ]
         
-        # Observation shape
-        self.observation_space = spaces.Dict({
-            'data': spaces.Box(
-                low=-np.inf, high=np.inf, 
-                shape=(self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size), 
-                dtype=np.float32
-            ),
-            'positions': spaces.Box(
-                low=-np.inf, high=np.inf, 
-                shape=(self.n_assets,), 
-                dtype=np.float32
-            ),
-            'portfolio_info': spaces.Box(
-                low=-np.inf, high=np.inf, 
-                shape=(self.portfolio_info_dim,),
-                dtype=np.float32
-            )
-        })
+        self.processor = CompositeProcessor(processor_configs)
+        
+        # Update observation space based on processor
+        self.observation_space = spaces.Dict(self.processor.get_observation_space())
 
         # Initialize state
         self.current_step = self.window_size
@@ -219,6 +241,10 @@ class TradingEnv(BaseTradingEnv):
             previous_portfolio_value=previous_portfolio_value,
         )
 
+        # Add penalty for constraint violations
+        penalty = np.sum(np.abs(feasible_action - intended_action)) * 0.001
+        reward -= penalty
+
         # --- 7. Check if episode is done ---
         self.done = self._is_done()
 
@@ -289,7 +315,7 @@ class TradingEnv(BaseTradingEnv):
             np.ndarray: Array of current prices for all assets
         """
         # Get current day's data for all assets
-        current_data = self.raw_data[self.raw_data[self.day_col] == self.current_step]
+        current_data = self.raw_data.loc[self.current_step]
         
         # Extract prices for each asset in the correct order
         prices = np.array([
@@ -298,27 +324,6 @@ class TradingEnv(BaseTradingEnv):
         ], dtype=np.float32)
         
         return prices
-    
-    def _get_market_data(self, asset: Optional[str] = None) -> np.ndarray:
-        """Get the window of market data for one or all assets.
-        Market data includes OHLCV data and technical indicators.
-        
-        Returns:
-            np.ndarray: Market data for the window of data
-            Asset Shape: (window_size, 5 + tech_dim)
-            All Assets Shape: (n_assets, 5 + tech_dim, window_size)
-        """ 
-        if asset and asset in self.asset_list:
-            market_data = self.processed_data[self.processed_data[self.tic_col] == asset].iloc[self.current_step - self.window_size:self.current_step][self.market_cols].values
-            return np.array(market_data, dtype=np.float32).transpose()
-        elif asset is None:
-            market_data = np.zeros((self.n_assets, self.ohlcv_dim + self.tech_dim, self.window_size))
-            for i, asset in enumerate(self.asset_list):
-                temp = self.processed_data[self.processed_data[self.tic_col] == asset].iloc[self.current_step - self.window_size:self.current_step][self.market_cols]
-                market_data[i, :, :] = np.array(temp.values, dtype=np.float32).transpose()
-            return market_data
-        else:
-            raise ValueError(f"Asset {asset} not found in asset list")
 
     def _execute_trades(self, feasible_action: np.ndarray, prices: np.ndarray) -> None:
         """
@@ -352,32 +357,22 @@ class TradingEnv(BaseTradingEnv):
 
     def _get_observation(self) -> Dict[str, np.ndarray]:
         """
-        Get the current observation for the agent.
+        Get the current observation for the agent using the composite processor.
         
         Returns:
             Dict[str, np.ndarray]: Dictionary with observation data
         """
-        
-        # Get current prices and portfolio value
-        current_prices = self._get_current_prices()
-        portfolio_value = self._calculate_portfolio_value(self.positions, current_prices)
-
-        # Get Market Data
-        market_data = self._get_market_data()
-
-        # Get scaled positions (portfolio weights)
-        scaled_positions = (self.positions * current_prices) / portfolio_value
-
-        # Get scaled info (cash and portfolio value)
-        scaled_cash = self.current_cash / portfolio_value
-        scaled_portfolio_value = np.sum(self.positions * current_prices) / portfolio_value
-
-        # Standardize observation
-        return {
-            'data': market_data,
-            'positions': scaled_positions,
-            'portfolio_info': np.array([scaled_cash, scaled_portfolio_value])
+        # Prepare data for processors
+        data = {
+            'market_data': self.processed_data,
+            'cash_data': self.current_cash,
+            'position_data': self.positions
         }
+        
+        # Process data using the composite processor
+        observation = self.processor.process(data, self.current_step)
+        
+        return observation
 
     def _is_done(self) -> bool:
         """Check if the episode is done."""
@@ -498,15 +493,13 @@ class TradingEnv(BaseTradingEnv):
     
     def get_position_limits(self) -> Dict[str, float]:
         """Get the position limits of the environment."""
-        if "position_limits" in self.limits:
-            return self.limits["position_limits"]
-        else:
-            raise ValueError("Position limits not found in limits")
+        position_limits = self.constraint_manager.get_parameters("position_limits") # Expects {'min': N, 'max': M}
+        return position_limits
         
     def get_action_dim(self) -> int:
         """Get the dimension of the action space."""
         return self.action_space.shape[0]
-        
+    
     def update_agent_info(self, agent_info: Dict[str, Any]) -> None:
         """
         Update the environment with agent information for visualization.
