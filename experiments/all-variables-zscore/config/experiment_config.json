@@ -1,0 +1,26 @@
+{
+    "experiment_name": "all-variables-zscore",
+    "max_train_time": 86400,
+    "eval_interval": 10,
+    "save_interval": 50,
+    "n_eval_episodes": 5,
+    "early_stopping_patience": 50,
+    "early_stopping_threshold": 0.01,
+    "metrics_to_track": [
+        "episode_reward",
+        "loss",
+        "epsilon",
+        "portfolio_value",
+        "sharpe_ratio",
+        "max_drawdown",
+        "total_return"
+    ],
+    "render_train": false,
+    "render_eval": false,
+    "agent_type": "DirectionalDQN",
+    "train_env_params": {
+        "n_assets": 29,
+        "initial_balance": 100000.0,
+        "window_size": 3
+    }
+}

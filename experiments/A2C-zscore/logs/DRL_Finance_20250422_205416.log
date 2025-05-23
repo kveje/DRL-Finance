@@ -1,0 +1,9 @@
+2025-04-22 20:54:16 - setup_logging - utils\setup_logging.py:54 - INFO - Logging system initialized
+2025-04-22 20:54:16 - setup_logging - utils\setup_logging.py:58 - INFO - Experiment logs will be saved to: experiments\A2C
+2025-04-22 20:54:16 - setup_logging - utils\setup_logging.py:68 - INFO - Log file: A2C.log
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:56 - INFO - Training experiment: A2C
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:57 - INFO - Maximum episodes: 1000000
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:58 - INFO - Maximum training time: 86400 seconds
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:87 - INFO - Loaded experiment manager from experiments\A2C\experiment_manager.pkl
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:92 - INFO - Updated max training time to 86400 seconds
+2025-04-22 20:54:16 - setup_logging - scripts\start_experiment.py:99 - INFO - Starting training...

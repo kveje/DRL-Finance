@@ -1,0 +1,70 @@
+2025-04-19 23:55:44 - setup_logging - utils\setup_logging.py:54 - INFO - Logging system initialized
+2025-04-19 23:55:44 - setup_logging - utils\setup_logging.py:58 - INFO - Experiment logs will be saved to: experiments\directional_dqn_with_constraint_penalty3
+2025-04-19 23:55:44 - setup_logging - utils\setup_logging.py:68 - INFO - Log file: directional_dqn_with_constraint_penalty3.log
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:56 - INFO - Training experiment: directional_dqn_with_constraint_penalty3
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:57 - INFO - Maximum episodes: 1000000
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:58 - INFO - Maximum training time: 86400 seconds
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:87 - INFO - Loaded experiment manager from experiments\directional_dqn_with_constraint_penalty3\experiment_manager.pkl
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:92 - INFO - Updated max training time to 86400 seconds
+2025-04-19 23:55:44 - setup_logging - scripts\start_experiment.py:99 - INFO - Starting training...
+2025-04-20 00:11:46 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 00:27:56 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 00:43:09 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 00:58:23 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 01:13:35 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 01:28:42 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 01:43:52 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 01:59:04 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 02:14:19 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 02:29:34 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 02:44:43 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 02:59:53 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 03:15:05 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 03:30:21 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 03:45:34 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 04:00:44 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 04:15:56 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 04:31:10 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 04:46:26 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 05:01:41 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 05:16:53 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 05:32:03 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 05:47:18 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 06:02:34 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 06:17:50 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 06:33:01 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 06:48:13 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 07:03:25 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 07:18:40 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 07:33:57 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 07:49:07 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 08:04:20 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 08:19:34 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 08:34:51 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 08:50:09 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 09:05:22 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 09:20:34 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 09:35:48 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 09:51:03 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 10:06:17 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 10:21:31 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 10:36:44 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 10:52:01 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 11:07:17 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 11:22:33 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 11:37:43 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 11:52:55 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 12:08:08 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 12:23:23 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 12:38:38 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 12:53:50 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 13:09:01 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 13:24:15 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 13:39:31 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 13:40:09 - directional_dqn_agent - models\agents\directional_dqn_agent.py:426 - INFO - Loaded model state dictionary directly into agent
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:104 - INFO - Training completed!
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:106 - INFO - Total episodes: 540
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:108 - INFO - Final training reward: 5.4196
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:110 - INFO - Final evaluation return: 0.0000
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:112 - INFO - Final Sharpe ratio: -1999999.9993
+2025-04-20 13:40:16 - setup_logging - scripts\start_experiment.py:114 - INFO - Final total return: 0.00%

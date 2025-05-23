@@ -1,0 +1,200 @@
+2025-04-29 22:23:42 - setup_logging - utils\setup_logging.py:54 - INFO - Logging system initialized
+2025-04-29 22:23:42 - setup_logging - utils\setup_logging.py:58 - INFO - Experiment logs will be saved to: experiments\ddpg_test
+2025-04-29 22:23:42 - setup_logging - utils\setup_logging.py:68 - INFO - Log file: setup_ddpg_test.log
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:90 - INFO - Setting up experiment: ddpg_test
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:91 - INFO - Using assets: ['AXP', 'AMGN', 'AAPL', 'BA', 'CAT', 'CSCO', 'CVX', 'GS', 'HD', 'HON', 'IBM', 'INTC', 'JNJ', 'KO', 'JPM', 'MCD', 'MMM', 'MRK', 'MSFT', 'NKE', 'PG', 'TRV', 'UNH', 'CRM', 'VZ', 'V', 'WBA', 'WMT', 'DIS']
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:92 - INFO - Training period: 2016-04-01 to 2022-03-31
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:93 - INFO - Validation period: 2022-04-01 to 2023-03-31
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:102 - INFO - Data manager initialized
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:103 - INFO -   Raw data directory: data/raw
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:104 - INFO -   Processed data directory: data/processed
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:105 - INFO -   Normalized data directory: data/normalized
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:106 - INFO -   Use saved data: True
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:107 - INFO -   Save raw data: True
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:108 - INFO -   Save processed data: True
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:109 - INFO -   Save normalized data: True
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:110 - INFO -   Available sources: ['yahoo']
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:111 - INFO -   Available processors: ['technical_indicator', 'turbulence', 'vix']
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:107 - INFO - Downloading data...
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:160 - INFO - Set current file base to: yahoo_AAPL-AMGN-AXP-BA-CAT-CRM-CSCO-CVX-DIS-GS-HD-HON-IBM-INTC-JNJ-JPM-KO-MCD-MMM-MRK-MSFT-NKE-PG-TRV-UNH-V-VZ-WBA-WMT_2016-04-01_2023-03-31_1d
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:212 - INFO - Loading saved raw data from data/raw\yahoo_AAPL-AMGN-AXP-BA-CAT-CRM-CSCO-CVX-DIS-GS-HD-HON-IBM-INTC-JNJ-JPM-KO-MCD-MMM-MRK-MSFT-NKE-PG-TRV-UNH-V-VZ-WBA-WMT_2016-04-01_2023-03-31_1d_raw.csv
+2025-04-29 22:23:42 - setup_logging - scripts\setup_experiment.py:119 - INFO - Processing data with technical indicators...
+2025-04-29 22:23:42 - data_manager - data\data_manager.py:280 - INFO - Applying processor: technical_indicator
+2025-04-29 22:23:42 - technical_indicator - data\processors\technical_indicator.py:112 - INFO - Calculating indicators: ['sma', 'ema', 'rsi', 'macd', 'bollinger', 'atr', 'obv', 'adx', 'cci', 'stoch', 'mfi', 'roc', 'williams_r', 'vwap', 'ichimoku', 'keltner', 'linreg']
+2025-04-29 22:23:53 - data_manager - data\data_manager.py:280 - INFO - Applying processor: vix
+2025-04-29 22:23:54 - yahoo - data\sources\yahoo.py:89 - INFO - Downloaded data for 1 tickers from 2016-04-01 to 2023-03-30
+2025-04-29 22:23:54 - data_manager - data\data_manager.py:317 - INFO - Saving processed data to: data/processed\yahoo_AAPL-AMGN-AXP-BA-CAT-CRM-CSCO-CVX-DIS-GS-HD-HON-IBM-INTC-JNJ-JPM-KO-MCD-MMM-MRK-MSFT-NKE-PG-TRV-UNH-V-VZ-WBA-WMT_2016-04-01_2023-03-31_1d_processed.csv
+2025-04-29 22:23:55 - setup_logging - scripts\setup_experiment.py:128 - INFO - Normalizing data...
+2025-04-29 22:23:55 - data_manager - data\data_manager.py:364 - INFO - Auto-generating feature groups from columns
+2025-04-29 22:23:55 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to price features: ['open', 'high', 'low', 'close']
+2025-04-29 22:23:55 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to volume features: ['volume']
+2025-04-29 22:23:55 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to market features: ['vix']
+2025-04-29 22:23:55 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to trend features: ['sma_5', 'sma_10', 'sma_20', 'sma_50', 'ema_5', 'ema_10', 'ema_20', 'ema_50', 'macd_line_12_26', 'macd_signal_9', 'macd_hist_12_26_9', 'vwap_daily', 'tenkan_sen_9', 'kijun_sen_26', 'senkou_span_a_26', 'senkou_span_b_52_26', 'chikou_span_26', 'keltner_middle_20', 'keltner_upper_20_10_2', 'keltner_lower_20_10_2']
+2025-04-29 22:23:56 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to momentum features: ['rsi_14', 'cci_20', 'stoch_k_14', 'stoch_d_14_3', 'mfi_14', 'roc_12', 'williams_r_14']
+2025-04-29 22:23:56 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to volatility features: ['bb_middle_20', 'bb_upper_20', 'bb_lower_20', 'bb_pct_b_20', 'atr_14', 'adx_14', 'pdi_14', 'ndi_14']
+2025-04-29 22:23:56 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to volume_indicators features: ['obv']
+2025-04-29 22:23:56 - data_manager - data\data_manager.py:384 - INFO - Applying percentage normalization to other features: ['linreg_slope_10', 'linreg_intercept_10', 'linreg_r2_10', 'linreg_slope_pvalue_10']
+2025-04-29 22:23:56 - data_manager - data\data_manager.py:409 - INFO - Saving normalized data to: data/normalized\yahoo_AAPL-AMGN-AXP-BA-CAT-CRM-CSCO-CVX-DIS-GS-HD-HON-IBM-INTC-JNJ-JPM-KO-MCD-MMM-MRK-MSFT-NKE-PG-TRV-UNH-V-VZ-WBA-WMT_2016-04-01_2023-03-31_1d_normalized_percentage.csv
+2025-04-29 22:23:58 - setup_logging - scripts\setup_experiment.py:138 - INFO - Splitting data into training and validation sets...
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:634 - WARNING - Test end date 2023-03-31 00:00:00 is after the latest available date 2023-03-30 00:00:00. Using 2023-03-30 00:00:00 instead.
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:709 - INFO - Resetting day indices for each split to start from 1
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 0-1511 to 1-1512
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 1512-1761 to 1-250
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:742 - INFO - Data split: Training: 43848 rows, Test: 7250 rows
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:634 - WARNING - Test end date 2023-03-31 00:00:00 is after the latest available date 2023-03-30 00:00:00. Using 2023-03-30 00:00:00 instead.
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:709 - INFO - Resetting day indices for each split to start from 1
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 0-1511 to 1-1512
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 1512-1761 to 1-250
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:742 - INFO - Data split: Training: 43848 rows, Test: 7250 rows
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:634 - WARNING - Test end date 2023-03-31 00:00:00 is after the latest available date 2023-03-30 00:00:00. Using 2023-03-30 00:00:00 instead.
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:709 - INFO - Resetting day indices for each split to start from 1
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 0-1511 to 1-1512
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:767 - INFO - Reset day index from 1512-1761 to 1-250
+2025-04-29 22:23:58 - data_manager - data\data_manager.py:742 - INFO - Data split: Training: 43848 rows, Test: 7250 rows
+2025-04-29 22:23:58 - setup_logging - scripts\setup_experiment.py:182 - INFO - Generating data visualizations...
+2025-04-29 22:23:58 - data_visualization - visualization\data_visualization.py:53 - INFO - Visualization tool initialized with output directory: experiments\ddpg_test\visualizations
+2025-04-29 22:23:58 - data_visualization - visualization\data_visualization.py:1393 - INFO - Generating raw data visualizations...
+2025-04-29 22:24:00 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:00 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:00 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:01 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:01 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:01 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:01 - data_visualization - visualization\data_visualization.py:1455 - INFO - Generating processed data visualizations...
+2025-04-29 22:24:15 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:16 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:16 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:17 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:19 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:19 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:19 - data_visualization - visualization\data_visualization.py:1517 - INFO - Generating normalized data visualizations...
+2025-04-29 22:24:28 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:28 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:29 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:29 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:31 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:31 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:33 - data_visualization - visualization\data_visualization.py:334 - INFO - Raw vs. normalized comparison saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:33 - data_visualization - visualization\data_visualization.py:1584 - INFO - All visualizations completed and saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:33 - data_visualization - visualization\data_visualization.py:1393 - INFO - Generating raw data visualizations...
+2025-04-29 22:24:34 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:34 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:34 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:35 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:35 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:35 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:35 - data_visualization - visualization\data_visualization.py:1455 - INFO - Generating processed data visualizations...
+2025-04-29 22:24:41 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:41 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:41 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:42 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:44 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:44 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:44 - data_visualization - visualization\data_visualization.py:1517 - INFO - Generating normalized data visualizations...
+2025-04-29 22:24:50 - data_visualization - visualization\data_visualization.py:701 - INFO - Aggregate distribution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:50 - data_visualization - visualization\data_visualization.py:785 - INFO - Time series bands plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:50 - data_visualization - visualization\data_visualization.py:854 - INFO - Feature evolution plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:50 - data_visualization - visualization\data_visualization.py:1294 - INFO - Grouped time series plots saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:52 - data_visualization - visualization\data_visualization.py:954 - INFO - Aggregate correlation matrix saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:52 - data_visualization - visualization\data_visualization.py:628 - INFO - Anomaly detection plot saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:53 - data_visualization - visualization\data_visualization.py:334 - INFO - Raw vs. normalized comparison saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:53 - data_visualization - visualization\data_visualization.py:1584 - INFO - All visualizations completed and saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:54 - data_visualization - visualization\data_visualization.py:1170 - INFO - Training vs validation comparison saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:54 - setup_logging - scripts\setup_experiment.py:220 - INFO - Data visualizations saved to experiments\ddpg_test\visualizations
+2025-04-29 22:24:54 - setup_logging - scripts\setup_experiment.py:227 - INFO - Saving data...
+2025-04-29 22:24:56 - setup_logging - scripts\setup_experiment.py:268 - INFO - Creating training and validation environments...
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:52 - INFO - Initializing TradingEnv
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:496 - INFO - Environment initialized with 29 assets
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:497 - INFO - Initial balance: $100000.00
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:498 - INFO - Window size: 3
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:499 - INFO - Data length: 43848
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:500 - INFO - Number of stocks: 29
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:501 - INFO - Action space: Box(-2147483646, 2147483645, (29,), int32)
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:491 - INFO - Random seed set to 193908
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:52 - INFO - Initializing TradingEnv
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:496 - INFO - Environment initialized with 29 assets
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:497 - INFO - Initial balance: $100000.00
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:498 - INFO - Window size: 3
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:499 - INFO - Data length: 7250
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:500 - INFO - Number of stocks: 29
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:501 - INFO - Action space: Box(-2147483646, 2147483645, (29,), int32)
+2025-04-29 22:24:56 - trading_env - environments\trading_env.py:491 - INFO - Random seed set to 671854
+2025-04-29 22:24:56 - setup_logging - scripts\setup_experiment.py:356 - INFO - Initializing DDPGAgent...
+2025-04-29 22:24:56 - ddpg_agent - models\agents\ddpg_agent.py:65 - INFO - DDPG Actor Network architecture: ActorNetwork(
+  (activation): ReLU()
+  (layers): ModuleList(
+    (0): Linear(in_features=4091, out_features=256, bias=True)
+    (1): Linear(in_features=256, out_features=128, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=128, out_features=64, bias=True)
+    (4): ReLU()
+  )
+  (direction_head): DirectionHead(
+    (linear): Linear(in_features=64, out_features=87, bias=True)
+  )
+  (alpha_head): LinearHead(
+    (linear): Linear(in_features=64, out_features=29, bias=True)
+  )
+  (beta_head): LinearHead(
+    (linear): Linear(in_features=64, out_features=29, bias=True)
+  )
+)
+2025-04-29 22:24:56 - ddpg_agent - models\agents\ddpg_agent.py:130 - INFO - DDPG Critic Network architecture: CriticNetwork(
+  (activation): ReLU()
+  (layers): ModuleList(
+    (0): Linear(in_features=4120, out_features=256, bias=True)
+    (1): Linear(in_features=256, out_features=128, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=128, out_features=64, bias=True)
+    (4): ReLU()
+  )
+  (q_head): Linear(in_features=64, out_features=1, bias=True)
+)
+2025-04-29 22:24:56 - ddpg_agent - models\agents\ddpg_agent.py:65 - INFO - DDPG Actor Network architecture: ActorNetwork(
+  (activation): ReLU()
+  (layers): ModuleList(
+    (0): Linear(in_features=4091, out_features=256, bias=True)
+    (1): Linear(in_features=256, out_features=128, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=128, out_features=64, bias=True)
+    (4): ReLU()
+  )
+  (direction_head): DirectionHead(
+    (linear): Linear(in_features=64, out_features=87, bias=True)
+  )
+  (alpha_head): LinearHead(
+    (linear): Linear(in_features=64, out_features=29, bias=True)
+  )
+  (beta_head): LinearHead(
+    (linear): Linear(in_features=64, out_features=29, bias=True)
+  )
+)
+2025-04-29 22:24:56 - ddpg_agent - models\agents\ddpg_agent.py:130 - INFO - DDPG Critic Network architecture: CriticNetwork(
+  (activation): ReLU()
+  (layers): ModuleList(
+    (0): Linear(in_features=4120, out_features=256, bias=True)
+    (1): Linear(in_features=256, out_features=128, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=128, out_features=64, bias=True)
+    (4): ReLU()
+  )
+  (q_head): Linear(in_features=64, out_features=1, bias=True)
+)
+2025-04-29 22:24:57 - setup_logging - scripts\setup_experiment.py:477 - INFO - Setting up experiment manager...
+2025-04-29 22:24:57 - experiment_ddpg_test - models\experiment_manager.py:197 - INFO - Saved experiment configuration to experiments\ddpg_test\config
+2025-04-29 22:24:57 - experiment_ddpg_test - models\experiment_manager.py:238 - INFO - Saved data information to experiments\ddpg_test\data
+2025-04-29 22:24:57 - experiment_ddpg_test - models\experiment_manager.py:152 - INFO - Initialized experiment: ddpg_test
+2025-04-29 22:24:57 - setup_logging - scripts\setup_experiment.py:496 - INFO - Saving experiment manager for later training...
+2025-04-29 22:24:57 - setup_logging - scripts\setup_experiment.py:496 - INFO - Saving experiment manager for later training...
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:500 - INFO - Experiment setup completed: ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:500 - INFO - Experiment setup completed: ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:501 - INFO - All required files have been saved to experiments\ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:501 - INFO - All required files have been saved to experiments\ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:502 - INFO - The experiment is ready to be trained with:
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:502 - INFO - The experiment is ready to be trained with:
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:503 - INFO -   python -m scripts.train_experiment --experiment-name ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:503 - INFO -   python -m scripts.train_experiment --experiment-name ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:504 - INFO - To continue training from a checkpoint later, use:
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:504 - INFO - To continue training from a checkpoint later, use:
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:505 - INFO -   python -m scripts.continue_experiment --experiment-name ddpg_test
+2025-04-29 22:24:58 - setup_logging - scripts\setup_experiment.py:505 - INFO -   python -m scripts.continue_experiment --experiment-name ddpg_test

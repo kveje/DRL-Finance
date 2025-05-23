@@ -1,0 +1,32 @@
+{
+    "env_params": {
+        "initial_capital": 100000,
+        "transaction_fee_percent": 0.001,
+        "window_size": 10
+    },
+    "friction_params": {
+        "slippage": {
+            "slippage_mean": 0.0,
+            "slippage_std": 0.001
+        },
+        "commission": {
+            "commission_rate": 0.001
+        }
+    },
+    "constraint_params": {
+        "position_limits": {
+            "min": 0,
+            "max": 10000
+        },
+        "cash_limit": {
+            "min": 0,
+            "max": 200000
+        }
+    },
+    "reward_params": [
+        "returns_based",
+        {
+            "scale": 10.0
+        }
+    ]
+}
