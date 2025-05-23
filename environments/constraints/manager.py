@@ -61,6 +61,8 @@ class ConstraintManager:
     
     def get_parameters(self, constraint_name: str) -> Dict[str, float]:
         """Get the parameters of a constraint."""
+        if constraint_name not in self.constraints:
+            raise ValueError(f"Constraint {constraint_name} not found in constraints")
         return self.constraints[constraint_name].get_parameters()
 
     def __str__(self) -> str:
