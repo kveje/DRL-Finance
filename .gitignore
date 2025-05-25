@@ -17,3 +17,5 @@ data/processed/
 data/normalized/
 *.pt
 README.PDF
+experiments/
+logs/
