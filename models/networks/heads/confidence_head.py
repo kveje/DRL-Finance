@@ -37,16 +37,24 @@ class ParametricConfidenceHead(BaseHead):
         Process input features and output confidence values.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing confidence values
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         confidences = self.confidence_layer(features)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            confidences = confidences.squeeze(0)
+        
         return {
-            "confidences": confidences  # (batch_size, n_assets)
+            "confidences": confidences  # (batch_size, n_assets) or (n_assets,)
         }
     
     def get_output_dim(self) -> int:
@@ -83,11 +91,15 @@ class BayesianConfidenceHead(BaseHead):
         Process input features and output confidence values.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing confidence values
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         alphas = self.alpha_layer(features)
         betas = self.beta_layer(features)
@@ -99,10 +111,16 @@ class BayesianConfidenceHead(BaseHead):
         # Calculate mean of Beta distribution
         confidences = alphas / (alphas + betas)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            confidences = confidences.squeeze(0)
+            alphas = alphas.squeeze(0)
+            betas = betas.squeeze(0)
+        
         return {
-            "confidences": confidences,  # (batch_size, n_assets)
-            "alphas": alphas,           # (batch_size, n_assets)
-            "betas": betas             # (batch_size, n_assets)
+            "confidences": confidences,  # (batch_size, n_assets) or (n_assets,)
+            "alphas": alphas,           # (batch_size, n_assets) or (n_assets,)
+            "betas": betas             # (batch_size, n_assets) or (n_assets,)
         }
     
     def sample(
@@ -115,7 +133,7 @@ class BayesianConfidenceHead(BaseHead):
         Sample confidence values from the distribution using specified strategy.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             strategy: Sampling strategy ("thompson", "entropy")
             **kwargs: Additional arguments for the sampling strategy
             
@@ -137,9 +155,9 @@ class BayesianConfidenceHead(BaseHead):
         samples = torch.clamp(samples, 0, 1)
         
         return {
-            "confidences": samples,  # (batch_size, n_assets)
-            "alphas": alphas,        # (batch_size, n_assets)
-            "betas": betas          # (batch_size, n_assets)
+            "confidences": samples,  # (batch_size, n_assets) or (n_assets,)
+            "alphas": alphas,        # (batch_size, n_assets) or (n_assets,)
+            "betas": betas          # (batch_size, n_assets) or (n_assets,)
         }
     
     def get_output_dim(self) -> int:

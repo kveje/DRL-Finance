@@ -31,9 +31,6 @@ class BaseHead(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU()
         ).to(device)
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:

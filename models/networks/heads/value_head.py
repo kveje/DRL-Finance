@@ -34,16 +34,24 @@ class ParametricValueHead(BaseHead):
         Process input features and output value estimate.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing value estimate
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         value = self.value_layer(features)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            value = value.squeeze(0)
+        
         return {
-            "value": value  # (batch_size, 1)
+            "value": value  # (batch_size, 1) or (1,)
         }
     
     def get_output_dim(self) -> int:
@@ -80,11 +88,15 @@ class BayesianValueHead(BaseHead):
         Process input features and output value estimate.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing value estimate
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         means = self.mean_layer(features)
         log_stds = self.log_std_layer(features)
@@ -92,10 +104,15 @@ class BayesianValueHead(BaseHead):
         # Ensure positive standard deviation
         stds = torch.exp(log_stds)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            means = means.squeeze(0)
+            stds = stds.squeeze(0)
+        
         return {
-            "value": means,  # (batch_size, 1)
-            "mean": means,   # (batch_size, 1)
-            "std": stds     # (batch_size, 1)
+            "value": means,  # (batch_size, 1) or (1,)
+            "mean": means,   # (batch_size, 1) or (1,)
+            "std": stds     # (batch_size, 1) or (1,)
         }
     
     def sample(
@@ -108,7 +125,7 @@ class BayesianValueHead(BaseHead):
         Sample values from the distribution using specified strategy.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             strategy: Sampling strategy ("thompson", "optimistic", "ucb")
             **kwargs: Additional arguments for the sampling strategy
             
@@ -129,9 +146,9 @@ class BayesianValueHead(BaseHead):
             raise ValueError(f"Unknown sampling strategy: {strategy}")
         
         return {
-            "value": samples,  # (batch_size, 1)
-            "mean": means,     # (batch_size, 1)
-            "std": stds       # (batch_size, 1)
+            "value": samples,  # (batch_size, 1) or (1,)
+            "mean": means,     # (batch_size, 1) or (1,)
+            "std": stds       # (batch_size, 1) or (1,)
         }
     
     def get_output_dim(self) -> int:

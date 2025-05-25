@@ -34,11 +34,15 @@ class ParametricDiscreteHead(BaseHead):
         Process input features and output action probabilities.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing action probabilities
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         logits = self.action_layer(features)
         
@@ -49,8 +53,12 @@ class ParametricDiscreteHead(BaseHead):
         # Apply softmax to get probabilities
         probs = torch.softmax(logits, dim=-1)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            probs = probs.squeeze(0)
+        
         return {
-            "action_probs": probs  # (batch_size, n_assets, 3)
+            "action_probs": probs  # (batch_size, n_assets, 3) or (n_assets, 3)
         }
     
     def get_output_dim(self) -> int:
@@ -87,11 +95,15 @@ class BayesianDiscreteHead(BaseHead):
         Process input features and output action probabilities.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             
         Returns:
             Dictionary containing action probabilities
         """
+        # Add batch dimension if not present
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+            
         features = self.processor(x)
         alphas = self.alpha_layer(features)
         betas = self.beta_layer(features)
@@ -108,10 +120,16 @@ class BayesianDiscreteHead(BaseHead):
         # Convert to probabilities using softmax
         probs = torch.softmax(alphas, dim=-1)
         
+        # Remove batch dimension if input was single sample
+        if x.shape[0] == 1 and x.dim() == 2:
+            probs = probs.squeeze(0)
+            alphas = alphas.squeeze(0)
+            betas = betas.squeeze(0)
+        
         return {
-            "action_probs": probs,  # (batch_size, n_assets, 3)
-            "alphas": alphas,       # (batch_size, n_assets, 3)
-            "betas": betas         # (batch_size, n_assets, 3)
+            "action_probs": probs,  # (batch_size, n_assets, 3) or (n_assets, 3)
+            "alphas": alphas,       # (batch_size, n_assets, 3) or (n_assets, 3)
+            "betas": betas         # (batch_size, n_assets, 3) or (n_assets, 3)
         }
     
     def sample(
@@ -124,7 +142,7 @@ class BayesianDiscreteHead(BaseHead):
         Sample action probabilities from the distribution using specified strategy.
         
         Args:
-            x: Input tensor of shape (batch_size, input_dim)
+            x: Input tensor of shape (batch_size, input_dim) or (input_dim,)
             strategy: Sampling strategy ("thompson", "entropy")
             **kwargs: Additional arguments for the sampling strategy
             
@@ -146,9 +164,9 @@ class BayesianDiscreteHead(BaseHead):
         samples = torch.softmax(samples, dim=-1)
         
         return {
-            "action_probs": samples,  # (batch_size, n_assets, 3)
-            "alphas": alphas,         # (batch_size, n_assets, 3)
-            "betas": betas           # (batch_size, n_assets, 3)
+            "action_probs": samples,  # (batch_size, n_assets, 3) or (n_assets, 3)
+            "alphas": alphas,         # (batch_size, n_assets, 3) or (n_assets, 3)
+            "betas": betas           # (batch_size, n_assets, 3) or (n_assets, 3)
         }
     
     def get_output_dim(self) -> int:
