@@ -10,10 +10,11 @@ class ConfidenceScaledInterpreter(BaseActionInterpreter):
     def __init__(
         self,
         n_assets: int,
-        max_position_size: float = 1.0,
+        max_position_size: float = 10,
         temperature: float = 1.0,
         temperature_decay: float = 0.995,
-        min_temperature: float = 0.1
+        min_temperature: float = 0.1,
+        interpreter_type: str = "confidence_scaled"
     ):
         """
         Initialize the confidence scaled interpreter.
@@ -24,13 +25,15 @@ class ConfidenceScaledInterpreter(BaseActionInterpreter):
             temperature: Initial temperature for Bayesian sampling
             temperature_decay: Rate at which temperature decays
             min_temperature: Minimum temperature value
+            interpreter_type: Type of interpreter to use
         """
         super().__init__(
             n_assets=n_assets,
             max_position_size=max_position_size,
             temperature=temperature,
             temperature_decay=temperature_decay,
-            min_temperature=min_temperature
+            min_temperature=min_temperature,
+            interpreter_type=interpreter_type
         )
     
     def interpret(
@@ -510,3 +513,12 @@ class ConfidenceScaledInterpreter(BaseActionInterpreter):
             print(f"[DEBUG] After squeeze, scaled_actions shape: {scaled_actions.shape}, values: {scaled_actions}")
         
         return scaled_actions, action_log_probs 
+    
+    def get_config(self):
+        return {
+            "n_assets": self.n_assets,
+            "max_position_size": self.max_position_size,
+            "temperature": self.temperature,
+            "temperature_decay": self.temperature_decay,
+            "min_temperature": self.min_temperature
+        }

@@ -13,7 +13,8 @@ class BaseActionInterpreter(ABC):
         max_position_size: float = 1.0,
         temperature: float = 1.0,
         temperature_decay: float = 0.995,
-        min_temperature: float = 0.1
+        min_temperature: float = 0.1,
+        interpreter_type: str = "discrete"
     ):
         """
         Initialize the base action interpreter.
@@ -24,12 +25,14 @@ class BaseActionInterpreter(ABC):
             temperature: Initial temperature for Bayesian sampling
             temperature_decay: Rate at which temperature decays
             min_temperature: Minimum temperature value
+            interpreter_type: Type of interpreter to use
         """
         self.n_assets = n_assets
         self.max_position_size = max_position_size
         self.temperature = temperature
         self.temperature_decay = temperature_decay
         self.min_temperature = min_temperature
+        self.interpreter_type = interpreter_type
     
     @abstractmethod
     def interpret(
@@ -178,4 +181,13 @@ class BaseActionInterpreter(ABC):
             Loss tensor
         """
         pass
+
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        """Get the configuration of the action interpreter."""
+        pass
+
+    def get_type(self) -> str:
+        """Get the type of the action interpreter."""
+        return self.interpreter_type
 

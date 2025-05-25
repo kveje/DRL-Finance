@@ -32,7 +32,7 @@ class InterpreterFactory:
             raise ValueError(f"Unsupported interpreter type: {interpreter_type}")
             
         interpreter_class = cls._interpreters[interpreter_type]
-        return interpreter_class(**kwargs)
+        return interpreter_class(interpreter_type=interpreter_type, **kwargs)
     
     @classmethod
     def register_interpreter(cls, name: str, interpreter_class: Type[BaseActionInterpreter]) -> None:
