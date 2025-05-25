@@ -84,4 +84,4 @@ TECHNICAL_INDICATOR_GROUPS = {
 }
 
 # Normalization Parameters
-NORMALIZATION_PARAMS = {"method": "zscore", "group_by": None}
+NORMALIZATION_PARAMS = {"method": "percentage", "group_by": None}

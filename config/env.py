@@ -46,10 +46,10 @@ REWARD_PARAMS = {
     #     "scale": 2
     # },
     "constraint_violation": {
-        "scale": 0.01
+        "scale": 0.001
     },
     "zero_action": {
-        "scale": 0.01,
+        "scale": 0.001,
         "window_size": 10,
         "min_consecutive_days": 5
     }
