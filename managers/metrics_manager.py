@@ -268,10 +268,6 @@ class MetricsManager:
             if len(values) == episode_count:
                 axes[i].set_title(f"{metric} vs Episode")
             axes[i].grid(True)
-            
-            # Add legend for reward components
-            if category == MetricCategory.REWARD:
-                axes[i].legend()
         
         plt.suptitle(title)
         plt.tight_layout(rect=[0, 0, 1, 0.97])
