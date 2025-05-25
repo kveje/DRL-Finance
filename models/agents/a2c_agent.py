@@ -300,5 +300,38 @@ class A2CAgent(BaseAgent):
             "entropy_coef": self.entropy_coef,
             "value_coef": self.value_coef,
             "max_grad_norm": self.max_grad_norm,
-            "device": self.device
+            "device": str(self.device),
+            "network_config": self.network_config
         }
+
+    def _get_agent_specific_state(self) -> Dict[str, Any]:
+        """
+        Get A2C-specific state for checkpointing.
+        
+        Returns:
+            Dictionary containing A2C-specific state
+        """
+        return {
+            'last_value': self.last_value.detach().cpu() if hasattr(self, 'last_value') else None,
+            'last_log_probs': self.last_log_probs.detach().cpu() if hasattr(self, 'last_log_probs') else None,
+            'last_policy_loss': getattr(self, 'last_policy_loss', 0.0),
+            'last_value_loss': getattr(self, 'last_value_loss', 0.0),
+            'last_entropy_loss': getattr(self, 'last_entropy_loss', 0.0),
+            'last_total_loss': getattr(self, 'last_total_loss', 0.0)
+        }
+    
+    def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
+        """
+        Load A2C-specific state from checkpoint.
+        
+        Args:
+            state_dict: Dictionary containing the agent's state
+        """
+        if 'last_value' in state_dict and state_dict['last_value'] is not None:
+            self.last_value = state_dict['last_value'].to(self.device)
+        if 'last_log_probs' in state_dict and state_dict['last_log_probs'] is not None:
+            self.last_log_probs = state_dict['last_log_probs'].to(self.device)
+        self.last_policy_loss = state_dict.get('last_policy_loss', 0.0)
+        self.last_value_loss = state_dict.get('last_value_loss', 0.0)
+        self.last_entropy_loss = state_dict.get('last_entropy_loss', 0.0)
+        self.last_total_loss = state_dict.get('last_total_loss', 0.0)

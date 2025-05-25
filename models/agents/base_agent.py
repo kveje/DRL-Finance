@@ -41,6 +41,9 @@ class BaseAgent(ABC):
         
         # Store network configuration
         self.network_config = network_config
+        
+        # Track training start time
+        self.start_time = None
     
     @abstractmethod
     def get_intended_action(
@@ -48,7 +51,7 @@ class BaseAgent(ABC):
         observations: Dict[str, torch.Tensor],
         current_position: np.ndarray,
         deterministic: bool = True
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Select an action based on the current state.
         
@@ -58,7 +61,9 @@ class BaseAgent(ABC):
             deterministic: Whether to use deterministic action selection
             
         Returns:
-            Selected action array
+            Tuple of (scaled_action, action_choice) where:
+            - scaled_action is the actual action to execute
+            - action_choice is the unscaled action (-1,0,1) for learning
         """
         pass
     
@@ -75,23 +80,69 @@ class BaseAgent(ABC):
         """
         pass
     
-    @abstractmethod
-    def save(self, path: str) -> None:
+    def get_state_dict(self) -> Dict[str, Any]:
         """
-        Save the agent's networks.
+        Get the agent's state dictionary for checkpointing.
+        
+        Returns:
+            Dictionary containing the agent's state
+        """
+        state = {
+            'network_state_dict': self.network.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'steps': getattr(self, 'steps', 0),
+            'start_time': self.start_time
+        }
+        
+        # Add agent-specific state
+        agent_state = self._get_agent_specific_state()
+        if agent_state:
+            state.update(agent_state)
+            
+        return state
+    
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """
+        Load the agent's state from a checkpoint.
         
         Args:
-            path: Base path to save the models
+            state_dict: Dictionary containing the agent's state
+        """
+        # Load common state
+        self.network.load_state_dict(state_dict['network_state_dict'])
+        self.optimizer.load_state_dict(state_dict['optimizer_state_dict'])
+        self.steps = state_dict.get('steps', 0)
+        self.start_time = state_dict.get('start_time')
+        
+        # Load agent-specific state
+        self._load_agent_specific_state(state_dict)
+    
+    @abstractmethod
+    def _get_agent_specific_state(self) -> Dict[str, Any]:
+        """
+        Get agent-specific state for checkpointing.
+        Override this method in agent implementations to add custom state.
+        
+        Returns:
+            Dictionary containing agent-specific state
         """
         pass
     
     @abstractmethod
-    def load(self, path: str) -> None:
+    def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
         """
-        Load the agent's networks.
+        Load agent-specific state from checkpoint.
+        Override this method in agent implementations to load custom state.
         
         Args:
-            path: Base path to load the models from
+            state_dict: Dictionary containing the agent's state
+        """
+        pass
+
+    @abstractmethod
+    def get_info(self) -> Dict[str, Any]:
+        """
+        Get information about the agent.
         """
         pass
     

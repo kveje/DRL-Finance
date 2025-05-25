@@ -66,6 +66,7 @@ class DQNAgent(BaseAgent):
         self.memory_size = memory_size
         self.batch_size = batch_size
         self.gamma = gamma
+        self.epsilon_start = epsilon_start
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
@@ -177,6 +178,7 @@ class DQNAgent(BaseAgent):
         elif isinstance(self.interpreter, ConfidenceScaledInterpreter):
             if not (('action_probs' in current_outputs and 'confidences' in current_outputs) or 
                    ('alphas' in current_outputs and 'betas' in current_outputs)):
+                print(current_outputs)
                 raise ValueError("Network outputs must contain either ('action_probs', 'confidences') or ('alphas', 'betas')")
         
         # Get target network outputs
@@ -225,12 +227,16 @@ class DQNAgent(BaseAgent):
         
         # Store loss for visualization
         self.last_loss = loss.item()
-        
-        return {
-            'loss': loss.item(),
-            'epsilon': self.epsilon,
-            'temperature': self.interpreter.get_temperature() if self.use_bayesian else None
+
+        metrics = {
+            "loss": loss.item(),
+            "epsilon": self.epsilon,
         }
+
+        if self.use_bayesian:
+            metrics["temperature"] = self.interpreter.get_temperature()
+
+        return metrics
     
     def save(self, path: str) -> None:
         """
@@ -309,8 +315,9 @@ class DQNAgent(BaseAgent):
             "target_update": self.target_update,
             "memory_size": self.memory_size,
             "batch_size": self.batch_size,
-            "device": self.device,
-            "use_bayesian": self.use_bayesian
+            "device": str(self.device),
+            "use_bayesian": self.use_bayesian,
+            "network_config": self.network_config
         }
 
     def add_to_memory(
@@ -411,3 +418,29 @@ class DQNAgent(BaseAgent):
             info['temperature'] = self.interpreter.get_temperature()
         
         return info
+
+    def _get_agent_specific_state(self) -> Dict[str, Any]:
+        """
+        Get DQN-specific state for checkpointing.
+        
+        Returns:
+            Dictionary containing DQN-specific state
+        """
+        return {
+            'epsilon': self.epsilon,
+            'target_network': self.target_network.state_dict(),
+            'temperature': self.interpreter.get_temperature() if self.use_bayesian else None
+        }
+    
+    def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
+        """
+        Load DQN-specific state from checkpoint.
+        
+        Args:
+            state_dict: Dictionary containing the agent's state
+        """
+        self.epsilon = state_dict.get('epsilon', self.epsilon)
+        if 'target_network_state_dict' in state_dict:
+            self.target_network.load_state_dict(state_dict['target_network_state_dict'])
+        if self.use_bayesian and 'temperature' in state_dict:
+            self.interpreter.set_temperature(state_dict['temperature'])

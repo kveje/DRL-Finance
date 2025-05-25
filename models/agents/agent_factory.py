@@ -50,11 +50,10 @@ class AgentFactory:
         if agent_type not in cls._agents:
             raise ValueError(f"Unsupported agent type: {agent_type}")
         
-        # Create the interpreter
+        # Create the interpreter with environment and configuration
         interpreter = InterpreterFactory.create_interpreter(
             interpreter_type=interpreter_type,
-            env=env,
-            **interpreter_config
+            **interpreter_config  # Pass all interpreter configuration
         )
         
         # Create and return the agent

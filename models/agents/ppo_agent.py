@@ -362,5 +362,56 @@ class PPOAgent(BaseAgent):
             "max_grad_norm": self.max_grad_norm,
             "ppo_epochs": self.ppo_epochs,
             "batch_size": self.batch_size,
-            "device": self.device
-        } 
+            "device": str(self.device),
+            "network_config": self.network_config
+        }
+
+    def _get_agent_specific_state(self) -> Dict[str, Any]:
+        """
+        Get PPO-specific state for checkpointing.
+        
+        Returns:
+            Dictionary containing PPO-specific state
+        """
+        return {
+            'last_value': self.last_value.detach().cpu() if hasattr(self, 'last_value') else None,
+            'last_log_probs': self.last_log_probs.detach().cpu() if hasattr(self, 'last_log_probs') else None,
+            'last_entropy': self.last_entropy.detach().cpu() if hasattr(self, 'last_entropy') else None,
+            'last_policy_loss': getattr(self, 'last_policy_loss', 0.0),
+            'last_value_loss': getattr(self, 'last_value_loss', 0.0),
+            'last_entropy_loss': getattr(self, 'last_entropy_loss', 0.0),
+            'last_total_loss': getattr(self, 'last_total_loss', 0.0),
+            'clip_ratio': self.clip_ratio,
+            'value_coef': self.value_coef,
+            'entropy_coef': self.entropy_coef,
+            'gae_lambda': self.gae_lambda,
+            'normalize_advantages': self.normalize_advantages,
+            'clip_grad_norm': self.clip_grad_norm
+        }
+    
+    def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
+        """
+        Load PPO-specific state from checkpoint.
+        
+        Args:
+            state_dict: Dictionary containing the agent's state
+        """
+        if 'last_value' in state_dict and state_dict['last_value'] is not None:
+            self.last_value = state_dict['last_value'].to(self.device)
+        if 'last_log_probs' in state_dict and state_dict['last_log_probs'] is not None:
+            self.last_log_probs = state_dict['last_log_probs'].to(self.device)
+        if 'last_entropy' in state_dict and state_dict['last_entropy'] is not None:
+            self.last_entropy = state_dict['last_entropy'].to(self.device)
+            
+        self.last_policy_loss = state_dict.get('last_policy_loss', 0.0)
+        self.last_value_loss = state_dict.get('last_value_loss', 0.0)
+        self.last_entropy_loss = state_dict.get('last_entropy_loss', 0.0)
+        self.last_total_loss = state_dict.get('last_total_loss', 0.0)
+        
+        # Load hyperparameters
+        self.clip_ratio = state_dict.get('clip_ratio', self.clip_ratio)
+        self.value_coef = state_dict.get('value_coef', self.value_coef)
+        self.entropy_coef = state_dict.get('entropy_coef', self.entropy_coef)
+        self.gae_lambda = state_dict.get('gae_lambda', self.gae_lambda)
+        self.normalize_advantages = state_dict.get('normalize_advantages', self.normalize_advantages)
+        self.clip_grad_norm = state_dict.get('clip_grad_norm', self.clip_grad_norm) 
