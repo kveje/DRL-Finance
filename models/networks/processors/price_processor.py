@@ -9,7 +9,9 @@ class PriceProcessor(BaseProcessor):
     def __init__(
         self,
         window_size: int,
-        hidden_dim: int,
+        n_assets: int,
+        asset_embedding_dim: int = 32,
+        hidden_dim: int = 128,
         device: str = "cuda"
     ):
         """
@@ -22,18 +24,44 @@ class PriceProcessor(BaseProcessor):
         """
         super().__init__(input_dim=window_size, hidden_dim=hidden_dim, device=device)
         self.window_size = window_size
+        self.n_assets = n_assets
+        self.asset_embedding_dim = asset_embedding_dim
+        self.hidden_dim = hidden_dim
         
-        self.processor = nn.Sequential(
-            nn.Conv1d(1, hidden_dim, kernel_size=3, padding=1),  # Input: (batch, 1, window_size)
-            nn.BatchNorm1d(hidden_dim),
+        # CNN for processing price series (for each asset)
+        self.asset_encoder = nn.Sequential(
+            # First conv block - extract basic patterns (2-3 timesteps)
+            nn.Conv1d(in_channels=1, out_channels=asset_embedding_dim//4, kernel_size=3, padding=1),
+            nn.BatchNorm1d(asset_embedding_dim//4),
             nn.ReLU(),
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
-            nn.BatchNorm1d(hidden_dim),
+            
+            # Second conv block - capture medium-term patterns (4-5 timesteps)
+            nn.Conv1d(in_channels=asset_embedding_dim//4, out_channels=asset_embedding_dim//2, kernel_size=5, padding=2),
+            nn.BatchNorm1d(asset_embedding_dim//2),
             nn.ReLU(),
+
+            # Third conv block - capture longer-term patterns (6-7 timesteps)
+            nn.Conv1d(in_channels=asset_embedding_dim//2, out_channels=asset_embedding_dim, kernel_size=7, padding=3),
+            nn.BatchNorm1d(asset_embedding_dim),
+            nn.ReLU(),
+            
+            # Global average pooling
             nn.AdaptiveAvgPool1d(1),
+
+            # Flatten
             nn.Flatten(),
-            nn.LayerNorm(hidden_dim),  # Add final normalization
-            nn.Tanh()  # Bound the output values
+        ).to(device)
+
+        # Linear layer to combine asset embeddings
+        self.asset_combiner = nn.Sequential(
+            nn.Linear(n_assets * asset_embedding_dim, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
+            nn.ReLU(),
+
+            # Reduce to hidden dimension
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU()
         ).to(device)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -42,34 +70,66 @@ class PriceProcessor(BaseProcessor):
         
         Args:
             x: Price tensor of shape (batch_size, n_assets, window_size)
-               or (window_size,) for single price series
+               or (n_assets, window_size) for multiple assets without batch
             
         Returns:
-            Processed tensor of shape (batch_size, n_assets, hidden_dim)
+            Processed tensor of shape (batch_size, hidden_dim)
         """
-        # Add batch dimension if needed
-        if len(x.shape) == 1:
-            x = x.unsqueeze(0)
-            
-        # Add channel dimension if needed
-        if len(x.shape) == 2:
-            x = x.unsqueeze(1)
-            
-        batch_size = x.shape[0]
-        n_assets = x.shape[1] if len(x.shape) == 3 else 1
+        # Case 1: Single price series
+        if len(x.shape) == 2 and x.shape[1] == self.window_size: # multiple price series
+            x = x.unsqueeze(0)  # [n_assets, window_size] -> [1, n_assets, window_size]
         
-        # Reshape for CNN processing
-        if len(x.shape) == 3:
-            # Handle multiple assets case
-            x = x.view(batch_size * n_assets, 1, self.window_size)
+        # Case 2: Batch of multiple assets
+        # pass
         
-        # Process through CNN
-        output = self.processor(x)  # (batch*n_assets, hidden_dim)
+        batch_size, n_assets, window_size = x.shape
+
+        # Step 1: Reshape for per-asset processing
+        x = x.view(batch_size * n_assets, 1, window_size) # shape: (batch_size * n_assets, 1, window_size)
+
+        # Step 2: Get asset embeddings
+        asset_embeddings = self.asset_encoder(x) # shape: (batch_size * n_assets, asset_embedding_dim)
+
+        # Step 3: Reshape back to batch format
+        asset_embeddings = asset_embeddings.view(batch_size, n_assets, -1) # shape: (batch_size, n_assets, asset_embedding_dim)
+
+        # Step 4: Reshape to fit combiner input (batch_size, n_assets*asset_embedding_dim)
+        asset_embeddings = asset_embeddings.view(batch_size, n_assets * self.asset_embedding_dim) # shape: (batch_size, n_assets*asset_embedding_dim)
+
+        # Step 5: Process through combiner
+        output = self.asset_combiner(asset_embeddings) # shape: (batch_size, hidden_dim)
         
-        # Reshape back to batch format
-        output = output.view(batch_size, n_assets, -1)
-        
-        return output
+        return output 
     
     def get_output_dim(self) -> int:
-        return self.hidden_dim 
+        return self.hidden_dim
+    
+    def get_asset_embeddings(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Utility method to get just the asset embeddings without final combination.
+        Useful for analysis/debugging.
+
+        Args:
+            x: Price tensor of shape (batch_size, n_assets, window_size) 
+               or (n_assets, window_size) for multiple assets without batch
+               or (window_size) for single price series
+
+        Returns:
+            Asset embeddings of shape (batch_size, n_assets, asset_embedding_dim)
+        """
+        if len(x.shape) == 1:
+            x = x.unsqueeze(0)  # [window_size] -> [1, window_size]
+            x = x.unsqueeze(1)  # [1, window_size] -> [1, 1, window_size]
+        elif len(x.shape) == 2 and x.shape[1] == self.window_size:
+            x = x.unsqueeze(0)  # [n_assets, window_size] -> [1, n_assets, window_size]
+        else:
+            raise ValueError(f"Invalid input shape: {x.shape}")
+
+        batch_size, n_assets, window_size = x.shape
+
+        x_reshaped = x.view(batch_size * n_assets, 1, window_size)
+        asset_embeddings = self.asset_encoder(x_reshaped) # shape: (batch_size * n_assets, asset_embedding_dim)
+        asset_embeddings = asset_embeddings.view(batch_size, n_assets, -1) # shape: (batch_size, n_assets, asset_embedding_dim)
+        return asset_embeddings
+    
+    

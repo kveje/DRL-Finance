@@ -9,7 +9,7 @@ class PositionProcessor(BaseProcessor):
     def __init__(
         self,
         n_assets: int,
-        hidden_dim: int,
+        hidden_dim: int = 64,
         device: str = "cuda"
     ):
         """
@@ -23,14 +23,11 @@ class PositionProcessor(BaseProcessor):
         super().__init__(input_dim=n_assets, hidden_dim=hidden_dim, device=device)
         self.n_assets = n_assets
         
-        # Use a two-layer network to capture relationships between assets
+        # Use a one-layer network to capture relationships between assets
         self.processor = nn.Sequential(
             nn.Linear(n_assets, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU()
         ).to(device)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:

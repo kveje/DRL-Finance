@@ -3,38 +3,41 @@ import torch
 import torch.nn as nn
 from .base_processor import BaseProcessor
 
-class CashProcessor(BaseProcessor):
-    """Processor for cash data (balance and portfolio value)."""
+class AffordabilityProcessor(BaseProcessor):
+    """Processor for affordability data."""
     
     def __init__(
         self,
-        input_dim: int,  # Usually 2 for [cash_balance, portfolio_value]
-        hidden_dim: int = 32,
+        n_assets: int,
+        hidden_dim: int = 64,
         device: str = "cuda"
     ):
         """
-        Initialize the cash processor.
+        Initialize the affordability processor.
         
         Args:
-            input_dim: Input dimension (number of cash-related features)
+            n_assets: Number of assets
             hidden_dim: Hidden dimension for processing
             device: Device to run the processor on
         """
-        super().__init__(input_dim=input_dim, hidden_dim=hidden_dim, device=device)
+        super().__init__(input_dim=n_assets, hidden_dim=hidden_dim, device=device)
         
         self.processor = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(n_assets, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU()
         ).to(device)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Process the cash data.
+        Process the affordability data.
         
         Args:
-            x: Cash tensor of shape (batch_size, input_dim)
-            or (input_dim) for single asset
+            x: Affordability tensor of shape (batch_size, n_assets) 
+            or (n_assets) for single asset
             
         Returns:
             Processed tensor
