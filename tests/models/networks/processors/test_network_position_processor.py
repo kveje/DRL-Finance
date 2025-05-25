@@ -120,6 +120,42 @@ class TestPositionProcessor(unittest.TestCase):
         # Check that output is still reasonable
         self.assertTrue(torch.all(torch.isfinite(output)))
         self.assertTrue(torch.all(torch.abs(output) < 100))
+        
+    def test_non_batched_input(self):
+        """Test processing of non-batched input thoroughly"""
+        # Test with single position data (no batch dimension)
+        x = torch.randn(self.n_assets, device=self.device)  # Shape: [n_assets]
+        output = self.processor(x)
+        
+        # Check output shape
+        self.assert_valid_processed_tensor(output, (1, self.hidden_dim))
+        
+        # Test that the output is deterministic
+        output2 = self.processor(x)
+        self.assertTrue(torch.allclose(output, output2))
+        
+        # Test that different inputs give different outputs
+        x2 = torch.randn(self.n_assets, device=self.device)
+        output3 = self.processor(x2)
+        self.assertFalse(torch.allclose(output, output3))
+        
+        # Test gradient flow with non-batched input
+        x.requires_grad = True
+        output = self.processor(x)
+        loss = output.sum()
+        loss.backward()
+        
+        # Check that gradients exist and are correct shape
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+        self.assertFalse(torch.allclose(x.grad, torch.zeros_like(x.grad)))
+        
+        # Test that the processor maintains asset relationships
+        x3 = x.clone()
+        x3[0] = x3[0] * 2  # Double the first asset's position
+        output4 = self.processor(x3)
+        self.assertFalse(torch.allclose(output, output4))  # Should be different
+        self.assertTrue(torch.all(torch.isfinite(output4)))  # Should still be reasonable
 
 if __name__ == "__main__":
     unittest.main()

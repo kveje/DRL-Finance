@@ -10,7 +10,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 # Import the function to test
-from environments.rewards.sharpe_based import SharpeBasedReward
+from environments.rewards.sharpe import SharpeReward
 
 class TestSharpeBasedReward(unittest.TestCase):
     """Test cases for the Sharpe Based Reward class."""
@@ -27,7 +27,7 @@ class TestSharpeBasedReward(unittest.TestCase):
         
 
     def test_initialization(self):
-        reward_class = SharpeBasedReward(self.config)
+        reward_class = SharpeReward(self.config)
         self.assertEqual(reward_class.annual_risk_free_rate, self.config["annual_risk_free_rate"])
         self.assertEqual(reward_class.annualization_factor, self.config["annualization_factor"])
         self.assertEqual(reward_class.window_size, self.config["window_size"])
@@ -35,7 +35,7 @@ class TestSharpeBasedReward(unittest.TestCase):
         self.assertEqual(reward_class.scale, self.config["scale"])
 
     def test_zero_return(self):
-        reward_class = SharpeBasedReward(self.config)
+        reward_class = SharpeReward(self.config)
         portfolio_value = 100.0
         previous_portfolio_value = 100.0
         
@@ -44,7 +44,7 @@ class TestSharpeBasedReward(unittest.TestCase):
         self.assertEqual(reward, expected_reward)
 
     def test_zero_excess_return(self):
-        reward_class = SharpeBasedReward(self.config)
+        reward_class = SharpeReward(self.config)
         portfolio_value = 100 * (1 + self.daily_risk_free_rate)
         previous_portfolio_value = 100.0
 
@@ -52,7 +52,7 @@ class TestSharpeBasedReward(unittest.TestCase):
         self.assertAlmostEqual(reward, 0.0)
 
     def test_positive_excess_return(self):
-        reward_class = SharpeBasedReward(self.config)
+        reward_class = SharpeReward(self.config)
         portfolio_value = 100 * (1 + self.daily_risk_free_rate + 0.01)
         previous_portfolio_value = 100.0
 
@@ -60,7 +60,7 @@ class TestSharpeBasedReward(unittest.TestCase):
         self.assertGreater(reward, 0.0)
 
     def test_negative_excess_return(self):
-        reward_class = SharpeBasedReward(self.config)
+        reward_class = SharpeReward(self.config)
         portfolio_value = 100 * (1 + self.daily_risk_free_rate - 0.01)
         previous_portfolio_value = 100.0
 
@@ -75,7 +75,7 @@ class TestSharpeBasedReward(unittest.TestCase):
             "min_history_size": 10,
             "scale": 2.0
         }
-        reward_class = SharpeBasedReward(config)
+        reward_class = SharpeReward(config)
         portfolio_value = 102.0
         previous_portfolio_value = 100.0
 
@@ -92,7 +92,7 @@ class TestSharpeBasedReward(unittest.TestCase):
             "scale": 1.0
         }
         n = 100
-        reward_class = SharpeBasedReward(config)
+        reward_class = SharpeReward(config)
         portfolio_value = 100.0
         previous_portfolio_value = 100.0
         percentage_return = np.random.uniform(-0.02, 0.02, n)

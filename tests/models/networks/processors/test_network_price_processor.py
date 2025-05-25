@@ -21,6 +21,7 @@ class TestPriceProcessor(unittest.TestCase):
         # Initialize processor
         self.processor = PriceProcessor(
             window_size=self.window_size,
+            n_assets=self.n_assets,
             hidden_dim=self.hidden_dim,
             device=self.device
         )
@@ -45,12 +46,6 @@ class TestPriceProcessor(unittest.TestCase):
         """Test processor initialization"""
         self.assertIsNotNone(self.processor)
         self.assertEqual(self.processor.window_size, self.window_size)
-        
-    def test_forward_shape_single_price(self):
-        """Test forward pass with single price series"""
-        x = torch.randn(self.window_size, device=self.device)  # Single price series
-        output = self.processor(x)
-        self.assert_valid_processed_tensor(output, (1, self.hidden_dim))
         
     def test_forward_shape_multiple_assets(self):
         """Test forward pass with multiple assets"""
@@ -155,6 +150,19 @@ class TestPriceProcessor(unittest.TestCase):
         # Check that output is still reasonable
         self.assertTrue(torch.all(torch.isfinite(output)))
         self.assertTrue(torch.all(torch.abs(output) < 100))
+        
+    def test_non_batched_input(self):
+        """Test processing of non-batched input thoroughly"""        
+        # Test with multiple assets but no batch dimension
+        x_multi = torch.randn(self.n_assets, self.window_size, device=self.device)  # Shape: [n_assets, window_size]
+        output_multi = self.processor(x_multi)
+        self.assert_valid_processed_tensor(output_multi, (1, self.hidden_dim))
+        
+        # Test that different assets produce different outputs
+        x_multi2 = x_multi.clone()
+        x_multi2[0] = torch.randn_like(x_multi2[0])  # Change first asset's prices
+        output_multi2 = self.processor(x_multi2)
+        self.assertFalse(torch.allclose(output_multi, output_multi2))
 
 if __name__ == "__main__":
     unittest.main()

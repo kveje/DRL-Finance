@@ -18,13 +18,12 @@ class TestCompositeProcessor(unittest.TestCase):
         self.ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
         self.position_limits = {'min': 0, 'max': 100}
         self.cash_limit = 100000.0
-        self.current_step = 20  # Add current step
+        self.current_step = 20
         
         # Create processor configurations
         self.processor_configs = [
             {
                 'type': 'price',
-                'data_name': 'market_data',
                 'kwargs': {
                     'window_size': self.window_size,
                     'asset_list': self.asset_list
@@ -32,14 +31,12 @@ class TestCompositeProcessor(unittest.TestCase):
             },
             {
                 'type': 'cash',
-                'data_name': 'cash_data',
                 'kwargs': {
                     'cash_limit': self.cash_limit
                 }
             },
             {
                 'type': 'position',
-                'data_name': 'position_data',
                 'kwargs': {
                     'position_limits': self.position_limits,
                     'asset_list': self.asset_list
@@ -47,14 +44,12 @@ class TestCompositeProcessor(unittest.TestCase):
             },
             {
                 'type': 'vix',
-                'data_name': 'market_data',
                 'kwargs': {
                     'window_size': self.window_size
                 }
             },
             {
                 'type': 'ohlcv',
-                'data_name': 'market_data',
                 'kwargs': {
                     'window_size': self.window_size,
                     'ohlcv_cols': self.ohlcv_cols,
@@ -63,10 +58,21 @@ class TestCompositeProcessor(unittest.TestCase):
             },
             {
                 'type': 'tech',
-                'data_name': 'market_data',
                 'kwargs': {
                     'tech_cols': self.tech_cols,
                     'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'affordability',
+                'kwargs': {
+                    'n_assets': len(self.asset_list)
+                }
+            },
+            {
+                'type': 'current_price',
+                'kwargs': {
+                    'n_assets': len(self.asset_list)
                 }
             }
         ]
@@ -92,28 +98,43 @@ class TestCompositeProcessor(unittest.TestCase):
         
         position_data = np.array([50, -30, 20])
         cash_data = 50000.0
+        raw_data = pd.DataFrame({
+            "day": np.repeat(np.arange(1, days+1), len(self.asset_list)),
+            "ticker": np.tile(self.asset_list, days),
+            "close": np.random.randn(len(self.asset_list) * days),
+            "open": np.random.randn(len(self.asset_list) * days),
+            "high": np.random.randn(len(self.asset_list) * days),
+            "low": np.random.randn(len(self.asset_list) * days),
+            "volume": np.random.randn(len(self.asset_list) * days)
+        })
+        raw_data = raw_data.set_index('day')
 
         self.test_data = {
-            'market_data': market_data,
-            'cash_data': cash_data,
-            'position_data': position_data
+            'market': market_data,
+            'cash': cash_data,
+            'position': position_data,
+            'raw': raw_data,
+            'step': self.current_step
         }
         
     def test_initialization(self):
         """Test processor initialization"""
         processor = CompositeProcessor(self.processor_configs)
-        self.assertEqual(len(processor.processors), 6)
+        self.assertEqual(len(processor.processors), 8)  # Updated count
         self.assertIn('price', processor.processors)
         self.assertIn('cash', processor.processors)
         self.assertIn('position', processor.processors)
         self.assertIn('vix', processor.processors)
         self.assertIn('ohlcv', processor.processors)
         self.assertIn('tech', processor.processors)
+        self.assertIn('affordability', processor.processors)
+        self.assertIn('current_price', processor.processors)
         
     def test_process(self):
         """Test processing data through all processors"""
         processor = CompositeProcessor(self.processor_configs)
-        result = processor.process(self.test_data, self.current_step)
+        result = processor.process(self.test_data)
+        
         # Check that all processors' outputs are present
         self.assertIn('price', result)
         self.assertIn('cash', result)
@@ -121,6 +142,8 @@ class TestCompositeProcessor(unittest.TestCase):
         self.assertIn('vix', result)
         self.assertIn('ohlcv', result)
         self.assertIn('tech', result)
+        self.assertIn('affordability', result)
+        self.assertIn('current_price', result)
         
         # Check shapes of processed data
         self.assertEqual(result['price'].shape, (len(self.asset_list), self.window_size))
@@ -129,18 +152,20 @@ class TestCompositeProcessor(unittest.TestCase):
         self.assertEqual(result['vix'].shape, (self.window_size,))
         self.assertEqual(result['ohlcv'].shape, (len(self.asset_list), len(self.ohlcv_cols), self.window_size))
         self.assertEqual(result['tech'].shape, (len(self.asset_list), len(self.tech_cols)))
+        self.assertEqual(result['affordability'].shape, (len(self.asset_list),))
+        self.assertEqual(result['current_price'].shape, (len(self.asset_list),))
         
     def test_missing_data(self):
         """Test handling of missing data"""
         processor = CompositeProcessor(self.processor_configs)
         incomplete_data = {
-            'market_data': self.test_data['market_data'],
-            'cash_data': self.test_data['cash_data']
-            # Missing position_data
+            'market': self.test_data['market'],
+            'cash': self.test_data['cash']
+            # Missing position and raw data
         }
         
         with self.assertRaises(KeyError):
-            processor.process(incomplete_data, self.current_step)
+            processor.process(incomplete_data)
             
     def test_observation_space(self):
         """Test observation space definition"""
@@ -153,6 +178,8 @@ class TestCompositeProcessor(unittest.TestCase):
         self.assertIn('vix', obs_space)
         self.assertIn('ohlcv', obs_space)
         self.assertIn('tech', obs_space)
+        self.assertIn('affordability', obs_space)
+        self.assertIn('current_price', obs_space)
         
     def test_input_dim(self):
         """Test input dimension calculation"""
@@ -166,7 +193,9 @@ class TestCompositeProcessor(unittest.TestCase):
             'position': (len(self.asset_list),),
             'vix': (self.window_size,),
             'ohlcv': (len(self.asset_list), len(self.ohlcv_cols), self.window_size),
-            'tech': (len(self.asset_list), len(self.tech_cols))
+            'tech': (len(self.asset_list), len(self.tech_cols)),
+            'affordability': (len(self.asset_list),),
+            'current_price': (len(self.asset_list),)
         }
 
         self.assertEqual(input_dim, expected_dim)

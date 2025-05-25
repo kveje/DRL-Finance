@@ -48,11 +48,6 @@ class TestTechProcessor(unittest.TestCase):
         self.assertEqual(self.processor.n_assets, self.n_assets)
         self.assertEqual(self.processor.tech_dim, self.tech_dim)
         
-    def test_forward_shape_single_asset(self):
-        """Test forward pass with single asset"""
-        x = torch.randn(1, self.tech_dim, device=self.device)  # Single asset
-        output = self.processor(x)
-        self.assert_valid_processed_tensor(output, (1, self.hidden_dim))
         
     def test_forward_shape_multiple_assets(self):
         """Test forward pass with multiple assets"""
@@ -78,22 +73,6 @@ class TestTechProcessor(unittest.TestCase):
         # Check that output values are reasonable
         self.assertTrue(torch.all(torch.isfinite(output)))
         
-    def test_asset_combining(self):
-        """Test that assets are properly combined"""
-        x = self.create_sample_input()
-        output = self.processor(x)
-        
-        # Check that output has been processed
-        # Process input through first layer only for comparison
-        processed = []
-        for i in range(self.n_assets):
-            asset_tech = x[:, i, :]
-            processed.append(self.processor.asset_processor(asset_tech))
-        x_processed = torch.cat(processed, dim=-1)
-        x_processed = self.processor.combiner(x_processed)
-        
-        # Compare with output (should be different due to final normalization and tanh)
-        self.assertFalse(torch.allclose(output, x_processed, rtol=1e-3))
         
     def test_output_range(self):
         """Test that output values are in reasonable range"""
@@ -130,6 +109,43 @@ class TestTechProcessor(unittest.TestCase):
         
         # Check that outputs are different
         self.assertFalse(torch.allclose(output1, output2))
+        
+    def test_non_batched_input(self):
+        """Test processing of non-batched input thoroughly"""
+        # Test with multiple assets but no batch dimension
+        x = torch.randn(self.n_assets, self.tech_dim, device=self.device)  # Shape: [n_assets, tech_dim]
+        output = self.processor(x)
+        
+        # Check output shape
+        self.assert_valid_processed_tensor(output, (1, self.hidden_dim))
+        
+        # Test that the output is deterministic
+        output2 = self.processor(x)
+        self.assertTrue(torch.allclose(output, output2))
+        
+        # Test that different inputs give different outputs
+        x2 = torch.randn(self.n_assets, self.tech_dim, device=self.device)
+        output3 = self.processor(x2)
+        self.assertFalse(torch.allclose(output, output3))
+        
+        # Test gradient flow with non-batched input
+        x.requires_grad = True
+        output = self.processor(x)
+        loss = output.sum()
+        loss.backward()
+        
+        # Check that gradients exist and are correct shape
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+        self.assertFalse(torch.allclose(x.grad, torch.zeros_like(x.grad)))
+        
+        # Test that the processor maintains asset relationships
+        x3 = x.clone()
+        x3[0] = x3[0] * 2  # Double the first asset's indicators
+        output4 = self.processor(x3)
+        self.assertFalse(torch.allclose(output, output4))  # Should be different
+        self.assertTrue(torch.all(torch.isfinite(output4)))  # Should still be reasonable
+        
 
 if __name__ == "__main__":
     unittest.main()
