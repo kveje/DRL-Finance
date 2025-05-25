@@ -6,6 +6,9 @@ from .tech_processor import TechProcessor
 from .position_processor import PositionProcessor
 from .vix_processor import VIXProcessor
 from .cash_processor import CashProcessor
+from .affordability_processor import AffordabilityProcessor
+from .current_price_processor import CurrentPriceProcessor
+
 
 class ProcessorFactory:
     """Factory class for creating different types of observation processors for the trading environment."""
@@ -17,6 +20,8 @@ class ProcessorFactory:
         'position': PositionProcessor,
         'vix': VIXProcessor,
         'cash': CashProcessor,
+        'affordability': AffordabilityProcessor,
+        'current_price': CurrentPriceProcessor,
     }
     
     @classmethod

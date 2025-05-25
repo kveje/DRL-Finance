@@ -22,32 +22,27 @@ class CompositeProcessor(BaseProcessor):
             processor_configs: List of dictionaries containing processor configurations.
                 Each dict should have:
                 - 'type': str - The type of processor ('price', 'ohlcv', etc.)
-                - 'data_name': str - The name of the data to use for this processor's input
-                - 'kwargs': dict - Additional arguments for the processor
+                - 'kwargs': dict - Arguments for initializing the processor
         """
         self.processors: Dict[str, BaseProcessor] = {}
-        self.data_names: Dict[str, str] = {}
 
         # Initialize each processor
         for config in processor_configs:
             processor_type = config['type']
-            data_name = config['data_name']
             kwargs = config.get('kwargs', {})
             
             # Create processor using factory
             processor = ProcessorFactory.create_processor(processor_type, **kwargs)
             
-            # Store processor and its output name
+            # Store processor and its configuration
             self.processors[processor_type] = processor
-            self.data_names[processor_type] = data_name
     
-    def process(self, data: Dict[str, Any], current_step: int) -> Dict[str, np.ndarray]:
+    def process(self, data: Dict[str, Any]) -> Dict[str, np.ndarray]:
         """
         Process the data using all registered processors.
         
         Args:
             data: Dictionary containing the data for each processor.
-                Keys should match the processor names.
             current_step: Current step in the environment
                 
         Returns:
@@ -55,14 +50,19 @@ class CompositeProcessor(BaseProcessor):
         """
         processed_data = {}
         
-        for name, processor in self.processors.items():
-            data_name = self.data_names[name]
+        for name, processor in self.processors.items():            
             # Process the data using the appropriate processor
             # Some processors need current_step, others don't
             if name in ['price', 'ohlcv', 'tech', 'vix']:
-                processed_data[name] = processor.process(data[data_name], current_step)
+                processed_data[name] = processor.process(data['market'], data['step'])
+            elif name in ['affordability', 'current_price']:
+                processed_data[name] = processor.process(data['raw'], data['cash'], data['step'])
+            elif name in ['cash']:
+                processed_data[name] = processor.process(data['cash'])
+            elif name in ['position']:
+                processed_data[name] = processor.process(data['position'])
             else:
-                processed_data[name] = processor.process(data[data_name])
+                raise ValueError(f"Processor {name} not found")
             
         return processed_data
     
