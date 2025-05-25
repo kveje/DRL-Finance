@@ -151,7 +151,7 @@ def main():
     assets = DOW_30_TICKER
     initial_capital = 100000.0
     transaction_cost = 0.001
-    output_dir = "results/baseline"
+    output_dir = "baseline_results"
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
