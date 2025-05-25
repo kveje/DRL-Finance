@@ -3,7 +3,7 @@ from typing import Dict, Any
 from .base_reward import BaseReward
 
 
-class SharpeBasedReward(BaseReward):
+class SharpeReward(BaseReward):
     """Reward function based on Sharpe ratio."""
 
     def __init__(

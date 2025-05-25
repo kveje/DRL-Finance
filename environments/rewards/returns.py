@@ -3,7 +3,7 @@ from typing import Dict, Any
 from .base_reward import BaseReward
 
 
-class ReturnsBasedReward(BaseReward):
+class ReturnsReward(BaseReward):
     """Reward function based on portfolio returns."""
 
     def __init__(self, config: Dict[str, Any]):
@@ -18,7 +18,7 @@ class ReturnsBasedReward(BaseReward):
                 Example:
                 {"scale": 1.0}
         """
-        super().__init__(name="returns_based")
+        super().__init__(name="returns")
         self.scale = config.get("scale", 1.0)
 
     def calculate(
@@ -42,19 +42,21 @@ class ReturnsBasedReward(BaseReward):
         portfolio_return = (
             portfolio_value - previous_portfolio_value
         ) / previous_portfolio_value
-        # Log-transform the reward
-        log_portfolio_return = np.log(portfolio_return + 1)
-        return log_portfolio_return * self.scale # Scale the reward
+
+        return portfolio_return * self.scale # Scale the reward
 
     def __str__(self) -> str:
         """Return a string representation of the reward function."""
-        return f"ReturnsBasedReward()"
+        return f"ReturnsReward(scale={self.scale})"
 
     def __repr__(self) -> str:
         """Return a string representation of the reward function."""
         return self.__str__()
 
+    def update_parameters(self, scale: float = 1.0):
+        """Update the reward function parameters."""
+        self.scale = scale
+
     def reset(self):
         """Reset the reward function."""
         pass
-
