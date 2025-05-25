@@ -8,7 +8,9 @@ from .processors import (
     TechProcessor,
     PriceProcessor,
     PositionProcessor,
-    CashProcessor
+    CashProcessor,
+    AffordabilityProcessor,
+    CurrentPriceProcessor
 )
 from .backbones.mlp_backbone import MLPBackbone
 from .heads import (
@@ -54,6 +56,7 @@ class UnifiedNetwork(nn.Module):
         total_input_dim = sum(
             processor.get_output_dim()
             for processor in self.processors.values()
+            if processor is not None  # Only include initialized processors
         )
         
         # Initialize backbone
@@ -72,40 +75,57 @@ class UnifiedNetwork(nn.Module):
             self.processors["ohlcv"] = OHLCVProcessor(
                 window_size=self.window_size,
                 hidden_dim=processor_configs["ohlcv"].get("hidden_dim", 256),
-                n_heads=processor_configs["ohlcv"].get("n_heads", 4),
-                device=self.device
+                device=self.device,
+                n_assets=self.n_assets
             )
-        
+
         # Technical Processor
         if processor_configs.get("technical", {}).get("enabled", False):
             self.processors["technical"] = TechProcessor(
                 n_assets=self.n_assets,
                 tech_dim=processor_configs["technical"].get("tech_dim", 20),
-                hidden_dim=processor_configs["technical"].get("hidden_dim", 128),
+                hidden_dim=processor_configs["technical"].get("hidden_dim", 64),
                 device=self.device
             )
-        
+
         # Price Processor
         if processor_configs.get("price", {}).get("enabled", False):
             self.processors["price"] = PriceProcessor(
                 window_size=self.window_size,
-                hidden_dim=processor_configs["price"].get("hidden_dim", 64),
+                n_assets=self.n_assets,
+                hidden_dim=processor_configs["price"].get("hidden_dim", 128),
                 device=self.device
             )
-        
+
         # Position Processor
         if processor_configs.get("position", {}).get("enabled", False):
             self.processors["position"] = PositionProcessor(
                 n_assets=self.n_assets,
-                hidden_dim=processor_configs["position"].get("hidden_dim", 32),
+                hidden_dim=processor_configs["position"].get("hidden_dim", 64),
                 device=self.device
             )
-        
+
         # Cash Processor
         if processor_configs.get("cash", {}).get("enabled", False):
             self.processors["cash"] = CashProcessor(
                 input_dim=processor_configs["cash"].get("input_dim", 2),
                 hidden_dim=processor_configs["cash"].get("hidden_dim", 32),
+                device=self.device
+            )
+
+        # Affordability Processor
+        if processor_configs.get("affordability", {}).get("enabled", False):
+            self.processors["affordability"] = AffordabilityProcessor(
+                n_assets=self.n_assets,
+                hidden_dim=processor_configs["affordability"].get("hidden_dim", 64),
+                device=self.device
+            )
+
+        # Current Price Processor
+        if processor_configs.get("current_price", {}).get("enabled", False):
+            self.processors["current_price"] = CurrentPriceProcessor(
+                n_assets=self.n_assets,
+                hidden_dim=processor_configs["current_price"].get("hidden_dim", 64),
                 device=self.device
             )
     
@@ -204,18 +224,18 @@ class UnifiedNetwork(nn.Module):
             
         Returns:
             Dictionary of outputs from each head:
-            - For value head: {'value': tensor} of shape (batch_size, 1)
-            - For discrete head: {'action_probs': tensor} or {'alphas': tensor, 'betas': tensor}
-            - For confidence head: {'confidences': tensor} or {'alphas': tensor, 'betas': tensor}
+            - For value head: {'value': tensor} of shape (batch_size, 1) or (1,) for single sample
+            - For discrete head: {'action_probs': tensor} of shape (batch_size, n_assets, 3) or (n_assets, 3) for single sample
+            - For confidence head: {'confidences': tensor} of shape (batch_size, n_assets) or (n_assets,) for single sample
         """
+        if not observations:
+            raise ValueError("No observations provided")
+            
         # Process each observation type through its processor
         processed_features = []
         for name, processor in self.processors.items():
             if name in observations:
                 features = processor(observations[name])
-                # Handle Price Processor's output shape (batch_size, n_assets, hidden_dim)
-                if name == "price" and len(features.shape) == 3:
-                    features = features.mean(dim=1)  # Average across assets
                 processed_features.append(features)
         
         # Concatenate all processed features
