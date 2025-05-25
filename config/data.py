@@ -5,24 +5,44 @@ from __future__ import annotations
 
 # Dates
 TRAIN_START_DATE = "2016-04-01"
-TRAIN_END_DATE = "2022-03-31"
+TRAIN_END_DATE = "2023-03-31"
 
-TEST_START_DATE = "2022-04-01"
-TEST_END_DATE = "2023-03-31"
+TEST_START_DATE = "2023-04-01"
+TEST_END_DATE = "2024-09-30"
 
-TRADE_START_DATE = "2023-04-01"
-TRADE_END_DATE = "2025-03-27"
+TRADE_START_DATE = "2024-10-01"
+TRADE_END_DATE = "2025-03-31"
 
+# Market Data Parameters
+VIX_PARAMS = {}
+TURBULENCE_PARAMS = {"window": 252}
 
 # Indicator Parameters
-INDICATOR_PARAMS = {
+NO_INDICATOR_PARAMS = {}
+SIMPLE_INDICATOR_PARAMS = {"ema": {"windows": [20,50]},
+                           "rsi": {"window": 14},
+                           "atr": {"window": 14},
+                           "obv": {},
+                           "linreg": {"window": 10}
+                           }
+
+ADVANCED_INDICATOR_PARAMS = {"ema": {"windows": [20,50]},
+                             "macd": {"fast": 12, "slow": 26, "signal": 9},
+                           "rsi": {"window": 14},
+                           "stoch": {"k_window": 14, "d_window": 3},
+                           "adx": {"window": 14},
+                           "atr": {"window": 14},
+                           "obv": {},
+                           "linreg": {"window": 10}
+                           }
+ALL_INDICATOR_PARAMS = {
     "sma": {"windows": [5, 10, 20, 50]},
     "ema": {"windows": [5, 10, 20, 50]},
     "rsi": {"window": 14},
     "macd": {"fast": 12, "slow": 26, "signal": 9},
     "bollinger": {"window": 20, "num_std": 2},
     "atr": {"window": 14},
-    "obv": {},
+    "obv": {}, 
     "adx": {"window": 14},
     "cci": {"window": 20},
     "stoch": {"k_window": 14, "d_window": 3},
@@ -39,14 +59,6 @@ INDICATOR_PARAMS = {
     "keltner": {"ema_window": 20, "atr_window": 10, "multiplier": 2},
     "linreg": {"window": 10},
 }
-
-# Processor Parameters
-PROCESSOR_PARAMS = {
-    "vix": {},
-    "turbulence": {"window": 252},
-    "technical_indicator": INDICATOR_PARAMS,
-}
-
 # Normalization Features
 EXCLUDE_COLUMNS = {"date", "ticker", "symbol", "day"}
 PRICE_COLUMNS = {"open", "high", "low", "close"}
@@ -72,4 +84,4 @@ TECHNICAL_INDICATOR_GROUPS = {
 }
 
 # Normalization Parameters
-NORMALIZATION_PARAMS = {"method": "percentage"}
+NORMALIZATION_PARAMS = {"method": "zscore", "group_by": None}
