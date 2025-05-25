@@ -16,7 +16,7 @@ logger = setup_logging(
 )
 
 # Import other modules
-from models.experiment_manager import ExperimentManager
+from managers.experiment_manager import ExperimentManager
 
 
 def parse_args():
@@ -53,21 +53,7 @@ def main():
         experiment_name=f"continue_{args.experiment_name}"
     )
     
-    # Check for model checkpoints
-    checkpoint_pattern = "model_episode_*.pt"
-    checkpoint_files = list(experiment_path.glob(f"**/{checkpoint_pattern}"))
-    
-    if not checkpoint_files:
-        logger.error(f"No model checkpoints found in {experiment_path}")
-        logger.error("The experiment must have been trained at least once before continuing")
-        return
-    
-    # Find the latest checkpoint
-    latest_checkpoint = max(checkpoint_files, key=lambda x: int(str(x).split("_episode_")[1].split(".")[0]))
-    latest_episode = int(str(latest_checkpoint).split("_episode_")[1].split(".")[0])
-    
     logger.info(f"Continuing experiment: {args.experiment_name}")
-    logger.info(f"Found latest checkpoint at episode {latest_episode}")
     logger.info(f"Additional episodes: {args.n_episodes}")
     logger.info(f"Maximum training time: {timedelta(seconds=args.max_train_time)}")
     
@@ -91,15 +77,15 @@ def main():
         # Print final metrics
         logger.info("Training completed!")
         if metrics:
-            logger.info(f"Total episodes: {len(metrics.get('episode', []))}")
+            logger.info(f"Total episodes: {experiment_manager.current_episode + 1}")
             if metrics.get('episode_reward'):
-                logger.info(f"Final training reward: {metrics['episode_reward'][-1]:.4f}")
+                logger.info(f"Final training reward: {metrics['episode_reward']:.4f}")
             if metrics.get('eval_return'):
-                logger.info(f"Final evaluation return: {metrics['eval_return'][-1]:.4f}")
+                logger.info(f"Final evaluation return: {metrics['eval_return']:.4f}")
             if metrics.get('sharpe_ratio'):
-                logger.info(f"Final Sharpe ratio: {metrics['sharpe_ratio'][-1]:.4f}")
+                logger.info(f"Final Sharpe ratio: {metrics['sharpe_ratio']:.4f}")
             if metrics.get('total_return'):
-                logger.info(f"Final total return: {metrics['total_return'][-1]:.2%}")
+                logger.info(f"Final total return: {metrics['total_return']:.2%}")
     except Exception as e:
         logger.error(f"Error during training: {str(e)}")
         raise
