@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Tuple
 import numpy as np
 
 # Initialize the logger
@@ -26,20 +26,26 @@ class BaseConstraint(ABC):
         self.violation_message = ""
         self.violation_details = {}
 
-    @abstractmethod
-    def check(self, action: np.ndarray, current_positions: np.ndarray, **kwargs) -> bool:
+    def validate_and_adjust_action(
+        self,
+        action: np.ndarray,
+        current_positions: np.ndarray,
+        current_cash: float,
+        current_prices: np.ndarray
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        Check if the action satisfies the constraint.
+        Validate and adjust the action to comply with this constraint.
 
         Args:
-            action: The action to check
-            current_positions: The current positions of the portfolio
-            **kwargs: Additional arguments needed for constraint checking
+            action: The action to validate
+            current_positions: Current positions
+            current_cash: Current cash balance
+            current_prices: Current prices
 
         Returns:
-            bool: True if constraint is satisfied, False otherwise
+            Tuple of (adjusted_action, violation_info)
         """
-        pass
+        raise NotImplementedError("Subclasses must implement validate_and_adjust_action")
 
     def _set_violation(self, message: str, details: Dict[str, Any] = {}) -> None:
         """
@@ -87,7 +93,10 @@ class BaseConstraint(ABC):
         Returns:
             Dict[str, Any]: Dictionary containing violation details
         """
-        return self.violation_details
+        return {
+            "constraint": self.name,
+            "violation_details": self.violation_details
+        }
     
     @abstractmethod
     def get_parameters(self) -> Dict[str, Any]:

@@ -24,55 +24,63 @@ class PositionLimits(BaseConstraint):
         Initialize position limits constraint.
 
         Args:
-            limits: Tuple of two floats/ints representing the minimum and maximum position limits.
+            config: Dictionary containing min and max position limits
             name: Name of the constraint
         """
         super().__init__(name)
         self.min_position = config["min"]
         self.max_position = config["max"]
 
-    def check(
+    def validate_and_adjust_action(
         self,
         action: np.ndarray,
         current_positions: np.ndarray,
         current_cash: float,
         current_prices: np.ndarray
-    ) -> bool:
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        Check if the action satisfies position limits.
+        Validate and adjust the action to comply with position limits.
         
-        For quantity-based actions, we need to check if the resulting position
-        (current position + action) satisfies the position limits.
-
         Args:
             action: Array of quantities to trade (positive for buy, negative for sell)
-            current_positions: Current positions in shares (required for quantity-based actions)
-            current_cash: Current cash
+            current_positions: Current positions in shares
+            current_cash: Current cash balance
             current_prices: Current prices
 
         Returns:
-            bool: True if all position limits are satisfied
+            Tuple of (adjusted_action, violation_info)
         """
         self._clear_violation()
+        feasible_action = action.copy()
+        violation_info = {}
         
         # Calculate resulting positions after executing the action
-        resulting_positions = current_positions + action
+        resulting_positions = current_positions + feasible_action
         
-        for asset_index, position in enumerate(resulting_positions):
-            if position < self.min_position:
-                self._set_violation(
-                    f"Resulting position {position:.2f} for asset {asset_index} below minimum limit {self.min_position:.2f}",
-                    {"constraint": self.name, "violation_details": {"position": position, "min_position": self.min_position}}
-                )
-                return False
-            elif position > self.max_position:
-                self._set_violation(
-                    f"Resulting position {position:.2f} for asset {asset_index} above maximum limit {self.max_position:.2f}",
-                    {"constraint": self.name, "violation_details": {"position": position, "max_position": self.max_position}}
-                )
-                return False
-
-        return True
+        # Check for violations
+        min_violations = resulting_positions < self.min_position
+        max_violations = resulting_positions > self.max_position
+        
+        if np.any(min_violations) or np.any(max_violations):
+            violation_info = {
+                "min_violations": np.where(min_violations)[0].tolist(),
+                "max_violations": np.where(max_violations)[0].tolist(),
+                "min_limit": self.min_position,
+                "max_limit": self.max_position
+            }
+            self._set_violation(
+                f"Position limits violated: {violation_info}",
+                violation_info
+            )
+        
+        # Clip to valid ranges
+        feasible_action = np.clip(
+            feasible_action,
+            self.min_position - current_positions,
+            self.max_position - current_positions
+        )
+        
+        return feasible_action, violation_info
 
     def update_limits(
         self, new_limits: Tuple[Union[float, int], Union[float, int]]
@@ -92,7 +100,7 @@ class PositionLimits(BaseConstraint):
 
     def __str__(self) -> str:
         """Return a string representation of the position limits constraint."""
-        return f"PositionLimits(limits={self.min_position}, {self.max_position})"
+        return f"PositionLimits(min={self.min_position}, max={self.max_position})"
 
     def __repr__(self) -> str:
         """Return a string representation of the position limits constraint."""
