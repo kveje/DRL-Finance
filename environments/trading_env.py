@@ -13,6 +13,7 @@ from .base_env import BaseTradingEnv
 from .rewards import RewardManager
 from .market_friction import MarketFrictionManager
 from .constraints import ConstraintManager
+from .constraints.action_validator import ActionValidator
 from visualization.trading_visualizer import TradingVisualizer
 from .processors.composite_processor import CompositeProcessor
 
@@ -30,7 +31,7 @@ class TradingEnv(BaseTradingEnv):
         columns: Dict[str, Union[str, List[str]]], # {ticker: "ticker", price: "close", day: "day", ohlcv: ["open", "high", "low", "close", "volume"], tech_cols: ["RSI", "MACD", "Bollinger Bands"]}
         env_params: Dict[str, Any] = {}, # {initial_balance: 100000.0, window_size: 10}
         friction_params: Dict[str, Dict[str, float]] = {}, # {slippage: {slippage_mean: 0.0, slippage_std: 0.001}, commission: {commission_rate: 0.001}}
-        reward_params: Tuple[str, Dict[str, Any]] = ("returns_based", {"scale": 1.0}), # (reward_type, reward_params) e.g. ("returns_based", {"scale": 1.0})
+        reward_params: Dict[str, Any] = {}, # {"returns": {"scale": 1.0}}
         constraint_params: Dict[str, Dict[str, float]] = {}, # {position_limits: {min: -1000, max: 1000}}
         processor_configs: List[Dict[str, Any]] = None, # List of processor configurations
         seed: Optional[int] = None,
@@ -53,7 +54,6 @@ class TradingEnv(BaseTradingEnv):
         super().__init__()
         
         logger.info(f"Initializing TradingEnv")
-
 
         # Data columns setup
         self.tic_col: str = columns.get("ticker", "ticker")
@@ -101,6 +101,7 @@ class TradingEnv(BaseTradingEnv):
         # Initialize managers for market frictions, constraints, and rewards
         self.market_frictions = MarketFrictionManager(friction_params)
         self.constraint_manager = ConstraintManager(constraint_params)
+        self.action_validator = ActionValidator(self.constraint_manager)
         self.reward_manager = RewardManager(reward_params)
 
         # Save the parameters
@@ -108,6 +109,7 @@ class TradingEnv(BaseTradingEnv):
         self.friction_params = friction_params
         self.constraint_params = constraint_params
         self.reward_params = reward_params
+        self.processor_configs = processor_configs
 
         # Get limits from constraints (for scaling)
         self.limits = {constraint: self.constraint_manager.get_parameters(constraint) for constraint in self.constraint_manager.constraints}
@@ -120,35 +122,6 @@ class TradingEnv(BaseTradingEnv):
             shape=(self.n_assets,),
             dtype=np.int32,
         )
-
-        # Initialize the composite processor
-        if processor_configs is None:
-            # Default processor configuration if none provided
-            processor_configs = [
-                {
-                    'type': 'price',
-                    'data_name': 'market_data',
-                    'kwargs': {
-                        'window_size': self.window_size,
-                        'asset_list': self.asset_list
-                    }
-                },
-                {
-                    'type': 'cash',
-                    'data_name': 'cash_data',
-                    'kwargs': {
-                        'cash_limit': self.constraint_manager.get_parameters("cash_limit")["max"]
-                    }
-                },
-                {
-                    'type': 'position',
-                    'data_name': 'position_data',
-                    'kwargs': {
-                        'position_limits': self.constraint_manager.get_parameters("position_limits"),
-                        'asset_list': self.asset_list
-                    }
-                }
-            ]
         
         self.processor = CompositeProcessor(processor_configs)
         
@@ -219,7 +192,7 @@ class TradingEnv(BaseTradingEnv):
         adjusted_prices = self.market_frictions.apply_frictions(intended_action, current_prices)
 
         # --- 3. Apply Constraints to get Feasible Action ---
-        feasible_action = self._apply_constraints_and_get_feasible_action(
+        feasible_action, violation_info = self.action_validator.validate_and_adjust_action(
             intended_action=intended_action,
             current_positions=current_positions,
             current_cash=current_cash,
@@ -235,15 +208,13 @@ class TradingEnv(BaseTradingEnv):
         self.current_step += 1
 
         # --- 6. Calculate Reward ---
-        # Reward is based on the change in portfolio value resulting from the *feasible_action*
-        reward = self.reward_manager.calculate(
+        # Reward is based on the change in portfolio value and constraint violations
+        reward, reward_components = self.reward_manager.calculate(
             portfolio_value=self.portfolio_value,
             previous_portfolio_value=previous_portfolio_value,
+            intended_action=intended_action,
+            feasible_action=feasible_action,
         )
-
-        # Add penalty for constraint violations
-        penalty = np.sum(np.abs(feasible_action - intended_action)) * 0.001
-        reward -= penalty
 
         # --- 7. Check if episode is done ---
         self.done = self._is_done()
@@ -255,57 +226,14 @@ class TradingEnv(BaseTradingEnv):
             current_value=self.portfolio_value,
             intended_action=intended_action,
             feasible_action=feasible_action,
-            reward=reward
+            reward=reward,
+            reward_components=reward_components
         )
 
         # --- 9. Get Next Observation ---
         observation = self._get_observation()
 
         return observation, reward, self.done, self.info
-
-    def _apply_constraints_and_get_feasible_action(
-        self,
-        intended_action: np.ndarray,
-        current_positions: np.ndarray,
-        current_cash: float,
-        adjusted_prices: np.ndarray
-    ) -> np.ndarray:
-        """
-        Adjusts the intended action to comply with position and cash constraints.
-
-        Args:
-            intended_action: Desired change in shares for each asset.
-            current_positions: Current shares held for each asset.
-            current_cash: Current cash balance.
-            adjusted_prices: Prices after accounting for slippage.
-
-        Returns:
-            The feasible action (change in shares) that respects constraints.
-        """
-        feasible_action = intended_action.copy()
-
-        # --- 1. Position Limit Constraints ---
-        pos_limits = self.constraint_manager.get_parameters("position_limits") # Expects {'min': N, 'max': M}
-        if pos_limits:
-            feasible_action = np.clip(feasible_action, pos_limits["min"] - current_positions, pos_limits["max"] - current_positions)
-
-        # --- 2. Cash Limit Constraints (Overall Portfolio) ---
-        # Net cash required for the trade
-        net_cash_flow_required = np.sum(feasible_action * adjusted_prices)
-
-        # Check against minimum cash limit
-        cash_limits = self.constraint_manager.get_parameters("cash_limit") # Expects {'min': X, 'max': Y}
-        available_cash_for_trade = current_cash - cash_limits['min']
-
-        if net_cash_flow_required > available_cash_for_trade:
-            # Not enough cash. Need to scale down buys. Sells help cash flow.
-            scaling_factor = available_cash_for_trade / net_cash_flow_required
-
-            # Apply scaling factor to buys
-            buy_mask = feasible_action > 0
-            feasible_action[buy_mask] = np.floor(feasible_action[buy_mask] * scaling_factor)
-
-        return feasible_action.astype(int) # Ensure same dtype
 
     def _get_current_prices(self) -> np.ndarray:
         """
@@ -364,13 +292,15 @@ class TradingEnv(BaseTradingEnv):
         """
         # Prepare data for processors
         data = {
-            'market_data': self.processed_data,
-            'cash_data': self.current_cash,
-            'position_data': self.positions
+            'market': self.processed_data,
+            'cash': self.current_cash,
+            'position': self.positions,
+            'raw': self.raw_data,
+            'step': self.current_step
         }
         
         # Process data using the composite processor
-        observation = self.processor.process(data, self.current_step)
+        observation = self.processor.process(data)
         
         return observation
 
@@ -384,7 +314,7 @@ class TradingEnv(BaseTradingEnv):
         
         return False
 
-    def _update_info(self, previous_value: float, current_value: float, intended_action: np.ndarray, feasible_action: np.ndarray, reward: float) -> Dict[str, Any]:
+    def _update_info(self, previous_value: float, current_value: float, intended_action: np.ndarray, feasible_action: np.ndarray, reward: float, reward_components: Dict[str, float]) -> Dict[str, Any]:
         """Update the info dictionary with current state and execution details."""
         # Calculate period return
         period_return = (current_value - previous_value) / previous_value if previous_value > 1e-9 else 0
@@ -397,6 +327,9 @@ class TradingEnv(BaseTradingEnv):
         
         # Get current prices
         current_prices = self._get_current_prices()
+        
+        # Get reward statistics
+        reward_stats = self.reward_manager.get_reward_statistics()
         
         return {
             "step": self.current_step,
@@ -411,6 +344,8 @@ class TradingEnv(BaseTradingEnv):
             "feasible_action": feasible_action.copy(),
             "action_clipping": clipping_details.copy(),
             "reward": reward,
+            "reward_components": reward_components,  # Add individual reward components
+            "reward_statistics": reward_stats,  # Add reward component statistics
             "termination_reason": "" # Update if termination conditions added
         }
 
