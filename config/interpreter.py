@@ -3,19 +3,13 @@
 # Default configuration for discrete action interpreter
 DISCRETE_INTERPRETER_CONFIG = {
     "n_assets": 0,  # Will be updated based on environment
-    "max_position_size": 10,
-    "temperature": 1.0,
-    "temperature_decay": 0.995,
-    "min_temperature": 0.1,
+    "max_trade_size": 10,
 }
 
 # Default configuration for confidence scaled interpreter
 CONFIDENCE_SCALED_INTERPRETER_CONFIG = {
     "n_assets": 0,  # Will be updated based on environment
-    "max_position_size": 10,
-    "temperature": 1.0,
-    "temperature_decay": 0.995,
-    "min_temperature": 0.1,
+    "max_trade_size": 10,
 }
  
 def get_interpreter_config(

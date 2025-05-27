@@ -9,12 +9,12 @@ BASE_CONFIG = {
     "processors": {
         "ohlcv": {
             "enabled": True,
-            "hidden_dim": 128,
+            "hidden_dim": 256,
             "asset_embedding_dim": 32
         },
         "price": {
             "enabled": True,
-            "hidden_dim": 64,
+            "hidden_dim": 128,
             "asset_embedding_dim": 16
         },
         "technical": {
@@ -33,16 +33,16 @@ BASE_CONFIG = {
         },
         "affordability": {
             "enabled": True,
-            "hidden_dim": 64
+            "hidden_dim": 32
         },
         "current_price": {
             "enabled": True,
-            "hidden_dim": 64
+            "hidden_dim": 32
         }
     },
     "backbone": {
         "type": "mlp",
-        "hidden_dims": [256, 128],
+        "hidden_dims": [128, 128],
         "dropout": 0.0,
         "use_layer_norm": True
     },
@@ -51,17 +51,20 @@ BASE_CONFIG = {
             "enabled": False,
             "type": "parametric",
             "hidden_dim": 128,
-            "num_actions": 3
+            "num_actions": 3,
+            "sampling_strategy": "thompson" # ["thompson", "entropy"]
         },
         "value": {
             "enabled": False,
             "type": "parametric",
-            "hidden_dim": 64
+            "hidden_dim": 32,
+            "sampling_strategy": "thompson" # ["thompson", "ucb", "optimistic"]
         },
         "confidence": {
             "enabled": False,
             "type": "parametric",
-            "hidden_dim": 128
+            "hidden_dim": 64,
+            "sampling_strategy": "thompson" # ["thompson", "entropy"]
         }
     }
 }
@@ -75,7 +78,9 @@ def get_network_config(
     include_confidence: bool = False,
     include_value: bool = False,
     technical_dim: Optional[int] = None,
-    
+    discrete_sampling_strategy: Optional[str] = None, # ["thompson", "entropy"]
+    confidence_sampling_strategy: Optional[str] = None, # ["thompson", "entropy"]
+    value_sampling_strategy: Optional[str] = None, # ["thompson", "ucb", "optimistic"]
 ) -> dict:
     """
     Generate a network configuration based on specified parameters.
@@ -112,42 +117,28 @@ def get_network_config(
     else:
         config["processors"]["technical"]["enabled"] = False
 
-    # Configure hidden dims for backbone
-    embedded_dim = sum(processor["hidden_dim"] for processor in config["processors"].values() if processor["enabled"])
-
-    if embedded_dim > 512:
-        config["backbone"]["hidden_dims"] = [256, 128]
-    elif embedded_dim > 256:
-        config["backbone"]["hidden_dims"] = [128, 64]
-    else:
-        config["backbone"]["hidden_dims"] = [64, 32]
-
     # Configure heads
     if include_discrete:
         config["heads"]["discrete"]["enabled"] = True
         if head_type == "bayesian":
             config["heads"]["discrete"]["type"] = "bayesian"
+        if discrete_sampling_strategy is not None:
+            config["heads"]["discrete"]["sampling_strategy"] = discrete_sampling_strategy
     
     # Add confidence head if requested
     if include_confidence:
         config["heads"]["confidence"]["enabled"] = True
         if head_type == "bayesian":
             config["heads"]["confidence"]["type"] = "bayesian"
+        if confidence_sampling_strategy is not None:
+            config["heads"]["confidence"]["sampling_strategy"] = confidence_sampling_strategy
     
     # Add value head if requested
     if include_value:
         config["heads"]["value"]["enabled"] = True
         if head_type == "bayesian":
             config["heads"]["value"]["type"] = "bayesian"
+        if value_sampling_strategy is not None:
+            config["heads"]["value"]["sampling_strategy"] = value_sampling_strategy
 
-    # Configure head dims
-    if embedded_dim > 512:
-        config["heads"]["discrete"]["hidden_dim"] = 128
-        config["heads"]["confidence"]["hidden_dim"] = 64
-        config["heads"]["value"]["hidden_dim"] = 32
-    elif embedded_dim > 256:
-        config["heads"]["discrete"]["hidden_dim"] = 64
-        config["heads"]["confidence"]["hidden_dim"] = 32
-        config["heads"]["value"]["hidden_dim"] = 16
-    
     return config
