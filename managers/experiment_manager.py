@@ -37,10 +37,9 @@ class ExperimentManager:
         val_env: TradingEnv,
         agent: BaseAgent,
         max_train_time: Optional[int] = None,  # Max training time in seconds (None for unlimited)
-        eval_interval: int = 10,  # Episodes between evaluations
+        eval_interval: int = 1,  # Episodes between evaluations
         save_interval: int = 50,  # Episodes between model saves
-        save_metric_interval: int = 2,  # Episodes between metric saves
-        n_eval_episodes: int = 5,  # Number of episodes for evaluation
+        save_metric_interval: int = 5,  # Episodes between metric saves
         early_stopping_patience: int = 100,  # Episodes with no improvement before stopping
         early_stopping_threshold: float = 0.01,  # Minimum improvement to reset patience
         early_stopping_metric: str = "sharpe_ratio",  # Metric to use for early stopping
@@ -61,7 +60,6 @@ class ExperimentManager:
             eval_interval: Number of episodes between evaluations
             save_interval: Number of episodes between model saves
             save_metric_interval: Number of episodes between metric saves
-            n_eval_episodes: Number of episodes for evaluation
             early_stopping_patience: Episodes with no improvement before stopping
             early_stopping_threshold: Minimum improvement to reset patience
             early_stopping_metric: Metric to use for early stopping (e.g., "sharpe_ratio", "total_return")
@@ -78,7 +76,6 @@ class ExperimentManager:
         self.eval_interval = eval_interval
         self.save_interval = save_interval
         self.save_metric_interval = save_metric_interval
-        self.n_eval_episodes = n_eval_episodes
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_threshold = early_stopping_threshold
         self.early_stopping_metric = early_stopping_metric
@@ -169,7 +166,6 @@ class ExperimentManager:
             eval_interval=self.eval_interval,
             save_interval=self.save_interval,
             save_metric_interval=self.save_metric_interval,
-            n_eval_episodes=self.n_eval_episodes,
             early_stopping_patience=self.early_stopping_patience,
             early_stopping_threshold=self.early_stopping_threshold,
             early_stopping_metric=self.early_stopping_metric,
@@ -196,6 +192,7 @@ class ExperimentManager:
         agent_config = self.agent.get_config()
         agent_config["interpreter_type"] = self.agent.interpreter.get_type()
         agent_config["interpreter_config"] = self.agent.interpreter.get_config()
+        agent_config["temperature_config"] = self.agent.temperature_manager.get_config()
         
         # Save agent config
         self.config_manager.save_agent_config(agent_config)
@@ -362,7 +359,6 @@ class ExperimentManager:
             # Select action
             intended_action, action_choice = self.agent.get_intended_action(
                 observation, 
-                current_position=self.train_env.get_current_position(),
                 deterministic=False  # Allow exploration during training
             )
             
@@ -372,9 +368,9 @@ class ExperimentManager:
             # Track portfolio value
             portfolio_values.append(info["portfolio_value"])
             
-            # Handle different agent types differently
-            if agent_type == "a2c":
-                # A2C uses a different update pattern (on-policy)
+            # Save experience
+            # Rollout for on-policy agents
+            if agent_type in ["a2c", "ppo"]:
                 self.agent.add_to_rollout(
                     observation=observation,
                     action=intended_action,
@@ -383,26 +379,8 @@ class ExperimentManager:
                     next_observation=next_observation,
                     done=done
                 )
-            elif agent_type == "ddpg":
-                # DDPG uses experience replay
-                self.agent.add_to_memory(
-                    observation=observation,
-                    action=intended_action,
-                    action_choice=action_choice,
-                    reward=reward,
-                    next_observation=next_observation,
-                    done=done
-                )
-                
-                # Update DDPG if enough samples
-                if len(self.agent.memory) >= self.agent.batch_size:
-                    update_metrics = self.agent.update()
-                    episode_loss.append(update_metrics.get("actor_loss", 0))
-                    # Store all metrics for later use
-                    for k, v in update_metrics.items():
-                        episode_metrics[k] = episode_metrics.get(k, []) + [v]
-            else:
-                # DQN-style agents use experience replay
+            # Memory for off-policy agents
+            elif agent_type in ["dqn", "ddpg", "sac"]:
                 self.agent.add_to_memory(
                     observation=observation,
                     action=intended_action,
@@ -412,15 +390,24 @@ class ExperimentManager:
                     done=done
                 )
 
-                # Update DQN-style agents if enough samples
-                if hasattr(self.agent, 'memory') and hasattr(self.agent, 'batch_size') and len(self.agent.memory) >= self.agent.batch_size:
-                    batch = self.agent.get_batch()
-                    update_metrics = self.agent.update(batch)
-                    episode_loss.append(update_metrics.get("loss", 0))
-                    # Store all metrics for later use
+            # Update if update_frequency is reached
+            if self.total_steps % self.agent.update_frequency == 0:
+                # Update for on-policy agents
+                if agent_type in ["a2c", "ppo"]:
+                    update_metrics = self.agent.update()
+
+                    # Store metrics
                     for k, v in update_metrics.items():
                         episode_metrics[k] = episode_metrics.get(k, []) + [v]
-            
+                # Update for off-policy agents
+                elif agent_type in ["dqn", "ddpg", "sac"]:
+                    if self.agent.sufficient_memory():
+                        update_metrics = self.agent.update()
+
+                        # Store metrics
+                        for k, v in update_metrics.items():
+                            episode_metrics[k] = episode_metrics.get(k, []) + [v]
+
             # Update visualization if enabled
             if self.render_train:
                 agent_info = self.agent.get_info()
@@ -432,12 +419,7 @@ class ExperimentManager:
             episode_steps += 1
             observation = next_observation
             self.total_steps += 1
-        
-        # For A2C, update at the end of episode
-        if agent_type == "a2c":
-            update_metrics = self.agent.update()
-            for k, v in update_metrics.items():
-                episode_metrics[k] = [v]  # Store as single-item list for consistency
+            self.agent.temperature_manager.step()
         
         # Calculate performance metrics
         portfolio_values = np.array(portfolio_values)
@@ -524,7 +506,7 @@ class ExperimentManager:
                 model_state_dict=self.agent.get_state_dict(),
                 deterministic=True,
                 episode_id=self.current_episode,
-                include_train=True,  # Only run on validation data during evaluation
+                include_train=True,
                 include_val=True,
                 save_visualization=True
             )
@@ -740,7 +722,7 @@ class ExperimentManager:
         exp_logger.info(f"Found latest checkpoint at episode {latest_episode}: {latest_model}")
         
         # Load the checkpoint
-        checkpoint = torch.load(latest_model)
+        checkpoint = torch.load(latest_model, weights_only=False)
         
         # Load metrics if available
         metrics_manager = MetricsManager(experiment_path, exp_logger)
@@ -826,7 +808,6 @@ class ExperimentManager:
             eval_interval=experiment_config.get("eval_interval", 10),
             save_interval=experiment_config.get("save_interval", 100),
             save_metric_interval=experiment_config.get("save_metric_interval", 1),
-            n_eval_episodes=experiment_config.get("n_eval_episodes", 5),
             early_stopping_patience=experiment_config.get("early_stopping_patience", 20),
             early_stopping_threshold=experiment_config.get("early_stopping_threshold", 0.01),
             early_stopping_metric=experiment_config.get("early_stopping_metric", "sharpe_ratio"),

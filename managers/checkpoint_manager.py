@@ -119,7 +119,8 @@ class CheckpointManager:
         Returns:
             Dictionary containing checkpoint data
         """
-        checkpoint = torch.load(checkpoint_path, map_location=self.agent.device)
+        # Use weights_only=False for our trusted experiment checkpoints
+        checkpoint = torch.load(checkpoint_path, map_location=self.agent.device, weights_only=False)
         
         # Load agent state
         self.agent.load_state_dict(checkpoint['agent_state'])
@@ -136,9 +137,49 @@ class CheckpointManager:
         Returns:
             Path to latest checkpoint if exists, None otherwise
         """
-        if not self.checkpoint_history:
+        # If we have checkpoint history, use it
+        if self.checkpoint_history:
+            return self.checkpoint_history[-1]
+        
+        # Otherwise, scan the filesystem for checkpoints
+        return self._scan_for_latest_checkpoint()
+    
+    def _scan_for_latest_checkpoint(self) -> Optional[str]:
+        """
+        Scan the checkpoint directory for the latest checkpoint file.
+        
+        Returns:
+            Path to the latest checkpoint if found, None otherwise
+        """
+        if not os.path.exists(self.checkpoint_dir):
             return None
-        return self.checkpoint_history[-1]
+        
+        # Find all checkpoint files
+        checkpoint_files = []
+        for filename in os.listdir(self.checkpoint_dir):
+            if filename.startswith("checkpoint_") and filename.endswith(".pt"):
+                checkpoint_path = os.path.join(self.checkpoint_dir, filename)
+                # Extract episode number from filename
+                try:
+                    # Format: checkpoint_ep{episode}_{timestamp}.pt
+                    episode_part = filename.split("_ep")[1].split("_")[0]
+                    episode = int(episode_part)
+                    checkpoint_files.append((episode, checkpoint_path))
+                except (IndexError, ValueError):
+                    # Skip files that don't match expected format
+                    continue
+        
+        if not checkpoint_files:
+            return None
+        
+        # Sort by episode number and return the latest
+        checkpoint_files.sort(key=lambda x: x[0])
+        latest_checkpoint = checkpoint_files[-1][1]
+        
+        # Rebuild checkpoint history for future use
+        self.checkpoint_history = [cp[1] for cp in checkpoint_files]
+        
+        return latest_checkpoint
     
     def get_best_checkpoint(self) -> Optional[str]:
         """
@@ -147,7 +188,53 @@ class CheckpointManager:
         Returns:
             Path to best checkpoint if exists, None otherwise
         """
-        return self.best_checkpoint_path
+        # If we have the best checkpoint path, return it
+        if self.best_checkpoint_path:
+            return self.best_checkpoint_path
+        
+        # Otherwise, scan filesystem and find best based on metrics
+        return self._scan_for_best_checkpoint()
+    
+    def _scan_for_best_checkpoint(self) -> Optional[str]:
+        """
+        Scan the checkpoint directory for the best checkpoint based on metrics.
+        
+        Returns:
+            Path to the best checkpoint if found, None otherwise
+        """
+        if not os.path.exists(self.checkpoint_dir):
+            return None
+        
+        # Find all checkpoint files and load their metrics
+        best_checkpoint = None
+        best_metric_value = float('-inf')
+        
+        for filename in os.listdir(self.checkpoint_dir):
+            if filename.startswith("checkpoint_") and filename.endswith(".pt"):
+                checkpoint_path = os.path.join(self.checkpoint_dir, filename)
+                try:
+                    # Load checkpoint to get metrics
+                    # Use weights_only=False for our trusted experiment checkpoints
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+                    metrics = checkpoint.get('metrics', {})
+                    metric_value = metrics.get(self.best_metric, float('-inf'))
+                    
+                    if metric_value > best_metric_value:
+                        best_metric_value = metric_value
+                        best_checkpoint = checkpoint_path
+                        
+                except Exception as e:
+                    # Skip corrupted checkpoints
+                    if self.logger:
+                        self.logger.warning(f"Could not load checkpoint {checkpoint_path}: {e}")
+                    continue
+        
+        # Update best checkpoint path for future use
+        if best_checkpoint:
+            self.best_checkpoint_path = best_checkpoint
+            self.best_metric_value = best_metric_value
+        
+        return best_checkpoint
     
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints if exceeding max_checkpoints."""

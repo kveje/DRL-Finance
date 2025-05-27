@@ -183,7 +183,7 @@ class BacktestManager:
         step = 0
         while not done:
             # Get action from agent
-            scaled_action, action_choice = self.agent.get_intended_action(obs, positions[-1], deterministic=deterministic)
+            scaled_action, action_choice = self.agent.get_intended_action(obs, deterministic=deterministic)
             
             # Take step
             next_obs, reward, done, info = env.step(scaled_action)
