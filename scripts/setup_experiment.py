@@ -24,6 +24,7 @@ from managers.experiment_manager import ExperimentManager
 from environments.trading_env import TradingEnv
 from visualization.data_visualization import DataVisualization
 from config.networks import get_network_config
+from config.temperature import get_temperature_config
 
 # Config imports
 from config.data import (
@@ -317,7 +318,6 @@ def main():
         technical_dim = len(columns["tech_cols"]) if args.indicator_type != "no" else None
     )
 
-    
     # Log the selected configurations
     logger.info(f"Using {args.agent_type} agent")
     logger.info(f"Using {args.interpreter_type} interpreter")
@@ -335,7 +335,7 @@ def main():
         "agent_type": args.agent_type,
         "interpreter_type": args.interpreter_type,
         "network_config": network_config,
-        "interpreter_config": interpreter_config
+        "interpreter_config": interpreter_config,
     }
     
     # Add agent-specific parameters based on the agent type
@@ -348,16 +348,26 @@ def main():
     elif args.agent_type == "a2c":
         agent_config.update(A2C_PARAMS)
     
+    # Add temperature configuration
+    temperature_config = get_temperature_config(network_config, update_frequency=agent_config["update_frequency"])
+    agent_config["temperature_config"] = temperature_config
+
+    # add use_bayesian to agent_config
+    if args.use_bayesian:
+        agent_config["use_bayesian"] = True
+    else:
+        agent_config["use_bayesian"] = False
+
     # Create agent using factory
     agent = AgentFactory.create_agent(
         agent_type=args.agent_type,
-        env=train_env,
         network_config=network_config,
         interpreter_type=args.interpreter_type,
         interpreter_config=interpreter_config,
+        temperature_config=temperature_config,
         device=device,  # Pass the torch.device object directly
         **{k: v for k, v in agent_config.items() if k not in [
-            "agent_type", "interpreter_type", "network_config", "interpreter_config"
+            "agent_type", "interpreter_type", "network_config", "interpreter_config", "temperature_config"
         ]}  # Only pass additional parameters, not the ones already specified
     )
     
@@ -371,7 +381,6 @@ def main():
         max_train_time=86400,  # 24 hours
         eval_interval=10,
         save_interval=50,
-        n_eval_episodes=5,
         early_stopping_patience=50,
         early_stopping_threshold=0.01,
         early_stopping_metric="sharpe_ratio",  # Default to sharpe ratio for early stopping

@@ -98,6 +98,7 @@ def main():
         logger.info("Creating agent...")
         agent = AgentFactory.create_agent(
             agent_type=experiment_config.get("agent_type", "dqn").lower(),
+            update_frequency=experiment_config.get("update_frequency", 1),
             env=train_env,
             **configs["agent"]  # Pass all agent config parameters
         )
@@ -111,7 +112,6 @@ def main():
             max_train_time=args.max_train_time,
             eval_interval=experiment_config.get("eval_interval", 10),
             save_interval=experiment_config.get("save_interval", 50),
-            n_eval_episodes=experiment_config.get("n_eval_episodes", 5),
             early_stopping_patience=experiment_config.get("early_stopping_patience", 50),
             early_stopping_threshold=experiment_config.get("early_stopping_threshold", 0.01),
             early_stopping_metric=experiment_config.get("early_stopping_metric", "sharpe_ratio"),
