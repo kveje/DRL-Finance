@@ -6,6 +6,7 @@ seaborn
 torch
 torchvision
 torchaudio
+torchrl
 
 # RL libraries
 gym
@@ -15,7 +16,11 @@ gymnasium
 yfinance
 finrl
 
-# Visualization and tracking
-wandb
-tensorboard
-torch-tb-profiler
+# Network analysis and visualization
+scikit-learn
+networkx
+plotly
+
+# ONNX export and visualization
+onnx
+netron
