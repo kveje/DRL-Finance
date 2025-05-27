@@ -77,12 +77,12 @@ class TestDQNAgent(unittest.TestCase):
         # Create interpreters
         self.discrete_interpreter = DiscreteInterpreter(
             n_assets=self.n_assets,
-            max_position_size=self.max_position_size
+            max_trade_size=self.max_position_size
         )
         
         self.confidence_interpreter = ConfidenceScaledInterpreter(
             n_assets=self.n_assets,
-            max_position_size=self.max_position_size
+            max_trade_size=self.max_position_size
         )
         
         # Create agents with their respective configs

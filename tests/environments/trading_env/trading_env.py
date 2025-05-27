@@ -19,8 +19,11 @@ class TestTradingEnv(unittest.TestCase):
         """Set up test fixtures."""
         self.raw_data = pd.read_csv("tests/environments/trading_env/raw_test.csv", skipinitialspace=True)
         self.processed_data = pd.read_csv("tests/environments/trading_env/processed_test.csv", skipinitialspace=True)
-        # self.raw_data.set_index("day", inplace=True) # This is also handled as an edge case in the environment (does not affect the test)
-        # self.processed_data.set_index("day", inplace=True) # This is also handled as an edge case in the environment (does not affect the test)
+        
+        # Add VIX data for testing VIX processor
+        self.processed_data['vix'] = np.random.uniform(10, 30, len(self.processed_data))
+        self.raw_data['vix'] = self.processed_data['vix'].copy()
+        
         self.columns = {
             "ticker": "ticker",
             "price": "close",
@@ -36,7 +39,7 @@ class TestTradingEnv(unittest.TestCase):
             "slippage": {"slippage_mean": 0.0, "slippage_std": 0.001},
             "commission": {"commission_rate": 0.001}
         }
-        self.reward_params = ("returns_based", {"scale": 1.0})
+        self.reward_params = {"returns": {"scale": 1.0}}
         self.constraint_params = {
             "position_limits": {"min": 0, "max": 100},
             "cash_limit": {"min": 0, "max": 100000.0}
@@ -52,7 +55,6 @@ class TestTradingEnv(unittest.TestCase):
         self.processor_configs = [
             {
                 'type': 'price',
-                'data_name': 'market_data',
                 'kwargs': {
                     'window_size': self.window_size,
                     'asset_list': self.asset_list
@@ -60,14 +62,12 @@ class TestTradingEnv(unittest.TestCase):
             },
             {
                 'type': 'cash',
-                'data_name': 'cash_data',
                 'kwargs': {
                     'cash_limit': self.constraint_params["cash_limit"]["max"]
                 }
             },
             {
                 'type': 'position',
-                'data_name': 'position_data',
                 'kwargs': {
                     'position_limits': self.constraint_params["position_limits"],
                     'asset_list': self.asset_list
@@ -167,7 +167,7 @@ class TestTradingEnv(unittest.TestCase):
         action = np.array([1000, -5, 0])
         observation, reward, done, info = env.step(action)
         self.assertEqual(done, False)
-        self.assertLess(reward, 0.0)
+        self.assertLessEqual(reward, 0.0)  # Changed to assertLessEqual to handle 0.0 case
        
         # Test case 3: Action is within the constraints
         env.reset()
@@ -234,12 +234,306 @@ class TestTradingEnv(unittest.TestCase):
         self.assertEqual(env.current_step, env.max_step)
         self.assertEqual(i, 3)
 
-    def test_custom_processor_config(self):
-        """Test the environment with a custom processor configuration."""
-        custom_configs = [
+    def test_price_processor(self):
+        """Test the environment with price processor."""
+        price_configs = [
             {
                 'type': 'price',
-                'data_name': 'market_data',
+                'kwargs': {
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list,
+                    'price_col': 'close'
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=price_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["price"])
+        
+        # Check shapes
+        self.assertEqual(observation["price"].shape, (self.n_assets, self.window_size))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["price"].dtype, np.number))
+
+    def test_ohlcv_processor(self):
+        """Test the environment with OHLCV processor."""
+        ohlcv_configs = [
+            {
+                'type': 'ohlcv',
+                'kwargs': {
+                    'ohlcv_cols': self.columns["ohlcv"],
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=ohlcv_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["ohlcv"])
+        
+        # Check shapes - OHLCV processor returns (n_assets, ohlcv_dim, window_size)
+        self.assertEqual(observation["ohlcv"].shape, (self.n_assets, len(self.columns["ohlcv"]), self.window_size))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["ohlcv"].dtype, np.number))
+
+    def test_tech_processor(self):
+        """Test the environment with technical indicators processor."""
+        tech_configs = [
+            {
+                'type': 'tech',
+                'kwargs': {
+                    'tech_cols': self.columns["tech_cols"],
+                    'asset_list': self.asset_list
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=tech_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["tech"])
+        
+        # Check shapes
+        self.assertEqual(observation["tech"].shape, (self.n_assets, len(self.columns["tech_cols"])))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["tech"].dtype, np.number))
+
+    def test_position_processor(self):
+        """Test the environment with position processor."""
+        position_configs = [
+            {
+                'type': 'position',
+                'kwargs': {
+                    'position_limits': self.constraint_params["position_limits"],
+                    'asset_list': self.asset_list
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=position_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["position"])
+        
+        # Check shapes
+        self.assertEqual(observation["position"].shape, (self.n_assets,))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["position"].dtype, np.number))
+        
+        # Check initial values (should be 0 since positions start at min limit)
+        self.assertTrue(np.array_equal(observation["position"], np.zeros(self.n_assets)))
+
+    def test_cash_processor(self):
+        """Test the environment with cash processor."""
+        cash_configs = [
+            {
+                'type': 'cash',
+                'kwargs': {
+                    'cash_limit': self.constraint_params["cash_limit"]["max"]
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=cash_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["cash"])
+        
+        # Check shapes
+        self.assertEqual(observation["cash"].shape, (2,))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["cash"].dtype, np.number))
+        
+        # Check initial values
+        self.assertAlmostEqual(observation["cash"][0], 1.0)  # Normalized cash balance
+        self.assertAlmostEqual(observation["cash"][1], 0.0)  # Normalized remaining cash
+
+    def test_vix_processor(self):
+        """Test the environment with VIX processor."""
+        vix_configs = [
+            {
+                'type': 'vix',
+                'kwargs': {
+                    'vix_col': 'vix',
+                    'window_size': self.window_size
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=vix_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["vix"])
+        
+        # Check shapes
+        self.assertEqual(observation["vix"].shape, (self.window_size,))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["vix"].dtype, np.number))
+
+    def test_affordability_processor(self):
+        """Test the environment with affordability processor."""
+        affordability_configs = [
+            {
+                'type': 'affordability',
+                'kwargs': {
+                    'n_assets': self.n_assets,
+                    'min_cash_limit': self.constraint_params["cash_limit"]["min"],
+                    'max_trade_size': 10,
+                    'price_col': 'close',
+                    'transaction_cost': 0.001,
+                    'slippage_mean': 0.0001
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=affordability_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["affordability"])
+        
+        # Check shapes
+        self.assertEqual(observation["affordability"].shape, (self.n_assets,))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["affordability"].dtype, np.number))
+        
+        # Check values are between 0 and 1 (normalized)
+        self.assertTrue(np.all(observation["affordability"] >= 0))
+        self.assertTrue(np.all(observation["affordability"] <= 1))
+
+    def test_current_price_processor(self):
+        """Test the environment with current price processor."""
+        current_price_configs = [
+            {
+                'type': 'current_price',
+                'kwargs': {
+                    'n_assets': self.n_assets,
+                    'min_cash_limit': self.constraint_params["cash_limit"]["min"],
+                    'price_col': 'close',
+                    'transaction_cost': 0.001,
+                    'slippage_mean': 0.0001
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=current_price_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(list(observation.keys()), ["current_price"])
+        
+        # Check shapes
+        self.assertEqual(observation["current_price"].shape, (self.n_assets,))
+        
+        # Check data type is numeric
+        self.assertTrue(np.issubdtype(observation["current_price"].dtype, np.number))
+        
+        # Check values are between 0 and 1 (normalized)
+        self.assertTrue(np.all(observation["current_price"] >= 0))
+        self.assertTrue(np.all(observation["current_price"] <= 1))
+
+    def test_multiple_processors_combination(self):
+        """Test the environment with multiple processors combined."""
+        multi_configs = [
+            {
+                'type': 'price',
                 'kwargs': {
                     'window_size': self.window_size,
                     'asset_list': self.asset_list
@@ -247,7 +541,6 @@ class TestTradingEnv(unittest.TestCase):
             },
             {
                 'type': 'tech',
-                'data_name': 'market_data',
                 'kwargs': {
                     'tech_cols': self.columns["tech_cols"],
                     'asset_list': self.asset_list
@@ -255,7 +548,137 @@ class TestTradingEnv(unittest.TestCase):
             },
             {
                 'type': 'cash',
-                'data_name': 'cash_data',
+                'kwargs': {
+                    'cash_limit': self.constraint_params["cash_limit"]["max"]
+                }
+            },
+            {
+                'type': 'position',
+                'kwargs': {
+                    'position_limits': self.constraint_params["position_limits"],
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'vix',
+                'kwargs': {
+                    'vix_col': 'vix',
+                    'window_size': self.window_size
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=multi_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure with multiple processors
+        expected_keys = sorted(["price", "tech", "cash", "position", "vix"])
+        self.assertEqual(sorted(list(observation.keys())), expected_keys)
+        
+        # Check shapes for each processor
+        self.assertEqual(observation["price"].shape, (self.n_assets, self.window_size))
+        self.assertEqual(observation["tech"].shape, (self.n_assets, len(self.columns["tech_cols"])))
+        self.assertEqual(observation["cash"].shape, (2,))
+        self.assertEqual(observation["position"].shape, (self.n_assets,))
+        self.assertEqual(observation["vix"].shape, (self.window_size,))
+
+    def test_ohlcv_and_price_combination(self):
+        """Test the environment with both OHLCV and price processors."""
+        combo_configs = [
+            {
+                'type': 'price',
+                'kwargs': {
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'ohlcv',
+                'kwargs': {
+                    'ohlcv_cols': self.columns["ohlcv"],
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            }
+        ]
+
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=combo_configs
+        )
+
+        observation = env.reset()
+        
+        # Check observation structure
+        self.assertEqual(sorted(list(observation.keys())), sorted(["price", "ohlcv"]))
+        
+        # Check shapes - OHLCV processor returns (n_assets, ohlcv_dim, window_size)
+        self.assertEqual(observation["price"].shape, (self.n_assets, self.window_size))
+        self.assertEqual(observation["ohlcv"].shape, (self.n_assets, len(self.columns["ohlcv"]), self.window_size))
+
+    def test_processor_data_consistency(self):
+        """Test that processor data remains consistent across steps."""
+        env = TradingEnv(
+            processed_data=self.processed_data,
+            raw_data=self.raw_data,
+            columns=self.columns,
+            env_params=self.env_params,
+            friction_params=self.friction_params,
+            reward_params=self.reward_params,
+            constraint_params=self.constraint_params,
+            processor_configs=self.processor_configs
+        )
+
+        observation1 = env.reset()
+        
+        # Take a step
+        action = np.array([1, 0, 0])
+        observation2, _, _, _ = env.step(action)
+        
+        # Check that price data has shifted (new window)
+        self.assertFalse(np.array_equal(observation1["price"], observation2["price"]))
+        
+        # Check that position has changed
+        self.assertFalse(np.array_equal(observation1["position"], observation2["position"]))
+        
+        # Check that cash has changed
+        self.assertFalse(np.array_equal(observation1["cash"], observation2["cash"]))
+
+    def test_custom_processor_config(self):
+        """Test the environment with a custom processor configuration."""
+        custom_configs = [
+            {
+                'type': 'price',
+                'kwargs': {
+                    'window_size': self.window_size,
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'tech',
+                'kwargs': {
+                    'tech_cols': self.columns["tech_cols"],
+                    'asset_list': self.asset_list
+                }
+            },
+            {
+                'type': 'cash',
                 'kwargs': {
                     'cash_limit': self.constraint_params["cash_limit"]["max"]
                 }

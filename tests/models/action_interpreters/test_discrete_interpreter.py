@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 import torch
 from unittest.mock import MagicMock
 import sys
@@ -16,102 +15,78 @@ class TestDiscreteInterpreter(unittest.TestCase):
         # Create interpreter with 3 assets
         self.interpreter = DiscreteInterpreter(
             n_assets=3,
-            max_position_size=10,
-            temperature=1.0,
-            temperature_decay=0.995,
-            min_temperature=0.1
+            max_trade_size=10,
         )
     
     def test_initialization(self):
         """Test that the interpreter initializes correctly."""
         self.assertIsNotNone(self.interpreter)
         self.assertEqual(self.interpreter.n_assets, 3)
-        self.assertEqual(self.interpreter.max_position_size, 10)
-        self.assertEqual(self.interpreter.temperature, 1.0)
-    
+        self.assertEqual(self.interpreter.max_trade_size, 10)
+
     def test_interpret_deterministic(self):
         """Test deterministic interpretation of action probabilities."""
         # Create sample network outputs
         network_outputs = {
-            'action_probs': np.array([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # First asset: strongly sell
                 [0.1, 0.8, 0.1],  # Second asset: strongly hold
                 [0.1, 0.1, 0.8]   # Third asset: strongly buy
-            ]])
+            ])
         }
         
-        # Current positions
-        current_position = np.array([50.0, 50.0, 50.0])
-        
         # Interpret actions deterministically
-        actions = self.interpreter.interpret(network_outputs, current_position, deterministic=True)
+        scaled_actions, action_choices = self.interpreter.interpret(network_outputs, deterministic=True)
         
         # Check shape
-        self.assertEqual(actions.shape, current_position.shape)
+        self.assertEqual(scaled_actions.shape, (3,))
+        self.assertEqual(action_choices.shape, (3,))
+        
+        # Check that actions are integers
+        self.assertEqual(scaled_actions.dtype, torch.int64)
         
         # Check expected actions (scaled by max_position_size)
-        self.assertEqual(actions[0], -10)  # Sell
-        self.assertEqual(actions[1], 0)    # Hold
-        self.assertEqual(actions[2], 10)   # Buy
+        self.assertEqual(scaled_actions[0].item(), -10)  # Sell
+        self.assertEqual(scaled_actions[1].item(), 0)    # Hold
+        self.assertEqual(scaled_actions[2].item(), 10)   # Buy
+        
+        # Check action choices
+        self.assertEqual(action_choices[0].item(), -1)  # Sell
+        self.assertEqual(action_choices[1].item(), 0)   # Hold
+        self.assertEqual(action_choices[2].item(), 1)   # Buy
     
     def test_interpret_stochastic(self):
         """Test stochastic interpretation of action probabilities."""
         # Create network outputs with equal distribution
         network_outputs = {
-            'action_probs': np.array([[
+            'action_probs': torch.tensor([
                 [0.33, 0.34, 0.33],  # Equal probabilities
                 [0.33, 0.34, 0.33],  # Equal probabilities
                 [0.33, 0.34, 0.33]   # Equal probabilities
-            ]])
+            ])
         }
-        
-        # Current positions
-        current_position = np.array([50.0, 50.0, 50.0])
         
         # Run multiple times to ensure stochastic behavior
         actions_list = []
         for _ in range(10):
-            actions = self.interpreter.interpret(network_outputs, current_position, deterministic=False)
-            actions_list.append(actions)
+            scaled_actions, action_choices = self.interpreter.interpret(network_outputs, deterministic=False)
+            actions_list.append((scaled_actions, action_choices))
         
         # Check that we get different actions (not all deterministic)
-        unique_actions = set(tuple(actions) for actions in actions_list)
+        unique_actions = set(tuple(actions[0].tolist()) for actions in actions_list)
         self.assertGreater(len(unique_actions), 1)
         
-        # Check that all actions are valid (-max_position_size, 0, or max_position_size)
-        for actions in actions_list:
-            self.assertTrue(np.all(np.isin(actions, [-10, 0, 10])))
-    
-    def test_handle_tensor_input(self):
-        """Test handling of tensor inputs."""
-        # Create tensor network outputs
-        network_outputs = {
-            'action_probs': torch.tensor([[
-                [0.8, 0.1, 0.1],  # Sell
-                [0.1, 0.8, 0.1],  # Hold
-                [0.1, 0.1, 0.8]   # Buy
-            ]])
-        }
-        
-        current_position = np.array([50.0, 50.0, 50.0])
-        
-        # Should handle tensor input
-        actions = self.interpreter.interpret(network_outputs, current_position)
-        
-        # Check that we get valid actions
-        self.assertTrue(np.all(np.isfinite(actions)))
-        self.assertEqual(actions.shape, current_position.shape)
-        
-        # Check expected actions (scaled by max_position_size)
-        self.assertEqual(actions[0], -10)  # Sell
-        self.assertEqual(actions[1], 0)    # Hold
-        self.assertEqual(actions[2], 10)   # Buy
+        # Check that all actions are valid
+        for scaled_actions, action_choices in actions_list:
+            self.assertEqual(scaled_actions.dtype, torch.int64)  # Check that actions are integers
+            self.assertTrue(torch.all(torch.isin(scaled_actions, torch.tensor([-10, 0, 10]))))
+            self.assertTrue(torch.all(torch.isin(action_choices, torch.tensor([-1, 0, 1]))))
     
     def test_handle_batch_input(self):
         """Test handling of batch inputs."""
         # Create batch of network outputs
         network_outputs = {
-            'action_probs': np.array([
+            'action_probs': torch.tensor([
                 [  # First batch
                     [0.8, 0.1, 0.1],  # Sell
                     [0.1, 0.8, 0.1],  # Hold
@@ -125,63 +100,38 @@ class TestDiscreteInterpreter(unittest.TestCase):
             ])
         }
         
-        current_position = np.array([50.0, 50.0, 50.0])
-        
-        # Should handle batch input and use first batch
-        actions = self.interpreter.interpret(network_outputs, current_position)
+        # Should handle batch input
+        scaled_actions, action_choices = self.interpreter.interpret(network_outputs)
         
         # Check that we get valid actions
-        self.assertTrue(np.all(np.isfinite(actions)))
-        self.assertEqual(actions.shape, current_position.shape)
+        self.assertTrue(torch.all(torch.isfinite(scaled_actions)))
+        self.assertEqual(scaled_actions.shape, (2, 3))
+        self.assertEqual(action_choices.shape, (2, 3))
+        self.assertEqual(scaled_actions.dtype, torch.int64)  # Check that actions are integers
         
         # Check expected actions from first batch (scaled by max_position_size)
-        self.assertEqual(actions[0], -10)  # Sell
-        self.assertEqual(actions[1], 0)    # Hold
-        self.assertEqual(actions[2], 10)   # Buy
-    
-    def test_handle_bayesian_output(self):
-        """Test handling of Bayesian head outputs."""
-        # Create Bayesian network outputs
-        network_outputs = {
-            'alphas': torch.tensor([[
-                [8.0, 1.0, 1.0],  # Strong sell
-                [1.0, 8.0, 1.0],  # Strong hold
-                [1.0, 1.0, 8.0]   # Strong buy
-            ]]),
-            'betas': torch.tensor([[
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0]
-            ]])
-        }
+        self.assertEqual(scaled_actions[0, 0].item(), -10)  # Sell
+        self.assertEqual(scaled_actions[0, 1].item(), 0)    # Hold
+        self.assertEqual(scaled_actions[0, 2].item(), 10)   # Buy
         
-        current_position = np.array([50.0, 50.0, 50.0])
-        
-        # Test deterministic interpretation
-        actions = self.interpreter.interpret(network_outputs, current_position, deterministic=True)
-        self.assertEqual(actions[0], -10)  # Strong sell
-        self.assertEqual(actions[1], 0)    # Hold
-        self.assertEqual(actions[2], 10)   # Strong buy
-        
-        # Test stochastic interpretation
-        actions = self.interpreter.interpret(network_outputs, current_position, deterministic=False)
-        self.assertTrue(np.all(np.isfinite(actions)))
-        self.assertEqual(actions.shape, current_position.shape)
-        self.assertTrue(np.all(np.isin(actions, [-10, 0, 10])))
+        # Check expected actions from second batch
+        self.assertEqual(scaled_actions[1, 0].item(), 10)   # Buy
+        self.assertEqual(scaled_actions[1, 1].item(), -10)  # Sell
+        self.assertEqual(scaled_actions[1, 2].item(), 0)    # Hold
     
     def test_get_q_values(self):
         """Test Q-value extraction."""
         # Create network outputs
         network_outputs = {
-            'action_probs': np.array([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # Sell
                 [0.1, 0.8, 0.1],  # Hold
                 [0.1, 0.1, 0.8]   # Buy
-            ]])
+            ])
         }
         
         # Test actions (scaled by max_position_size)
-        actions = np.array([-10, 0, 10])  # sell, hold, buy
+        actions = torch.tensor([-1, 0, 1])  # sell, hold, buy
         
         # Get Q-values
         q_values = self.interpreter.get_q_values(network_outputs, actions)
@@ -198,11 +148,11 @@ class TestDiscreteInterpreter(unittest.TestCase):
         """Test maximum Q-value extraction."""
         # Create network outputs
         network_outputs = {
-            'action_probs': np.array([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # Sell
                 [0.1, 0.8, 0.1],  # Hold
                 [0.1, 0.1, 0.8]   # Buy
-            ]])
+            ])
         }
         
         # Get max Q-values
@@ -220,74 +170,36 @@ class TestDiscreteInterpreter(unittest.TestCase):
         """Test interpretation with log probabilities."""
         # Create sample network outputs
         network_outputs = {
-            'action_probs': np.array([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # First asset: strongly sell
                 [0.1, 0.8, 0.1],  # Second asset: strongly hold
                 [0.1, 0.1, 0.8]   # Third asset: strongly buy
-            ]])
+            ])
         }
         
-        current_position = np.array([50.0, 50.0, 50.0])
-        
         # Get actions and log probabilities
-        scaled_actions, log_probs = self.interpreter.interpret_with_log_prob(network_outputs, current_position)
+        scaled_actions, action_choices, log_probs = self.interpreter.interpret_with_log_prob(network_outputs)
         
         # Check shapes
-        self.assertEqual(scaled_actions.shape, current_position.shape)
-        self.assertEqual(log_probs.shape, current_position.shape)
+        self.assertEqual(scaled_actions.shape, (3,))
+        self.assertEqual(action_choices.shape, (3,))
+        self.assertEqual(log_probs.shape, (3,))
+        
+        # Check that actions are integers
+        self.assertEqual(scaled_actions.dtype, torch.int64)
         
         # Check that actions are valid
-        self.assertTrue(np.all(np.isin(scaled_actions, [-10, 0, 10])))
+        self.assertTrue(torch.all(torch.isin(scaled_actions, torch.tensor([-10, 0, 10]))))
+        self.assertTrue(torch.all(torch.isin(action_choices, torch.tensor([-1, 0, 1]))))
         
         # Check that log probabilities are valid (negative numbers)
-        self.assertTrue(np.all(log_probs <= 0))
+        self.assertTrue(torch.all(log_probs <= 0))
         
         # Check that log probabilities correspond to actions
-        for i, action in enumerate(scaled_actions):
-            action_idx = int(action / 10) + 1  # Convert -10,0,10 to 0,1,2
-            expected_log_prob = np.log(network_outputs['action_probs'][0, i, action_idx])
-            self.assertAlmostEqual(log_probs[i], expected_log_prob)
-    
-    def test_interpret_with_log_prob_bayesian(self):
-        """Test interpretation with log probabilities for Bayesian outputs."""
-        # Create Bayesian network outputs
-        network_outputs = {
-            'alphas': np.array([[
-                [8.0, 1.0, 1.0],  # Strong sell
-                [1.0, 8.0, 1.0],  # Strong hold
-                [1.0, 1.0, 8.0]   # Strong buy
-            ]]),
-            'betas': np.array([[
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0]
-            ]])
-        }
-        
-        current_position = np.array([50.0, 50.0, 50.0])
-        
-        # Get actions and log probabilities
-        scaled_actions, log_probs = self.interpreter.interpret_with_log_prob(network_outputs, current_position)
-        
-        # Check shapes
-        self.assertEqual(scaled_actions.shape, current_position.shape)
-        self.assertEqual(log_probs.shape, current_position.shape)
-        
-        # Check that actions are valid
-        self.assertTrue(np.all(np.isin(scaled_actions, [-10, 0, 10])))
-        
-        # Check that log probabilities are valid (negative numbers)
-        self.assertTrue(np.all(log_probs <= 0))
-        
-        # Check that log probabilities correspond to actions
-        probs = network_outputs['alphas'] / (network_outputs['alphas'] + network_outputs['betas'])
-        # Normalize probabilities to match implementation
-        probs = probs / np.sum(probs, axis=-1, keepdims=True)
-        
-        for i, action in enumerate(scaled_actions):
-            action_idx = int(action / 10) + 1  # Convert -10,0,10 to 0,1,2
-            expected_log_prob = np.log(probs[0, i, action_idx])
-            self.assertAlmostEqual(log_probs[i], expected_log_prob)
+        for i, action in enumerate(action_choices):
+            action_idx = int(action.item()) + 1  # Convert -1,0,1 to 0,1,2
+            expected_log_prob = torch.log(network_outputs['action_probs'][i, action_idx])
+            self.assertAlmostEqual(log_probs[i].item(), expected_log_prob.item())
     
     def test_scale_actions(self):
         """Test scaling of actions."""
@@ -297,6 +209,7 @@ class TestDiscreteInterpreter(unittest.TestCase):
         
         # Check shape and values
         self.assertEqual(scaled_actions.shape, (3,))
+        self.assertEqual(scaled_actions.dtype, torch.int64)  # Check that tensor is integer type
         self.assertEqual(scaled_actions[0].item(), -10)  # -1 * max_position_size
         self.assertEqual(scaled_actions[1].item(), 0)    # 0 * max_position_size
         self.assertEqual(scaled_actions[2].item(), 10)   # 1 * max_position_size
@@ -307,6 +220,7 @@ class TestDiscreteInterpreter(unittest.TestCase):
         
         # Check shape and values
         self.assertEqual(batch_scaled.shape, (2, 3))
+        self.assertEqual(batch_scaled.dtype, torch.int64)  # Check that tensor is integer type
         self.assertTrue(torch.all(batch_scaled[0] == torch.tensor([-10, 0, 10])))
         self.assertTrue(torch.all(batch_scaled[1] == torch.tensor([10, -10, 0])))
     
@@ -314,95 +228,209 @@ class TestDiscreteInterpreter(unittest.TestCase):
         """Test evaluation of action log probabilities."""
         # Create sample network outputs
         network_outputs = {
-            'action_probs': torch.tensor([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # First asset: strongly sell
                 [0.1, 0.8, 0.1],  # Second asset: strongly hold
                 [0.1, 0.1, 0.8]   # Third asset: strongly buy
-            ]])
+            ])
         }
         
         # Test single action
         actions = torch.tensor([-1, 0, 1])  # sell, hold, buy
-        scaled_actions, log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, actions)
+        log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, actions)
         
-        # Check shapes
-        self.assertEqual(scaled_actions.shape, (3,))
+        # Check shape
         self.assertEqual(log_probs.shape, (3,))
-        
-        # Check scaled actions
-        self.assertEqual(scaled_actions[0].item(), -10)  # sell
-        self.assertEqual(scaled_actions[1].item(), 0)    # hold
-        self.assertEqual(scaled_actions[2].item(), 10)   # buy
         
         # Check log probabilities
         expected_log_probs = torch.log(torch.tensor([0.8, 0.8, 0.8]))
         self.assertTrue(torch.allclose(log_probs, expected_log_probs))
         
-        # Test batch of actions
-        batch_actions = torch.tensor([[-1, 0, 1], [1, -1, 0]])
-        batch_scaled, batch_log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, batch_actions)
-        
-        # Check shapes
-        self.assertEqual(batch_scaled.shape, (2, 3))
-        self.assertEqual(batch_log_probs.shape, (2, 3))
-        
-        # Check scaled actions
-        self.assertTrue(torch.all(batch_scaled[0] == torch.tensor([-10, 0, 10])))
-        self.assertTrue(torch.all(batch_scaled[1] == torch.tensor([10, -10, 0])))
-        
-        # Check log probabilities
-        expected_batch_log_probs = torch.log(torch.tensor([[0.8, 0.8, 0.8], [0.8, 0.8, 0.8]]))
-        self.assertTrue(torch.allclose(batch_log_probs, expected_batch_log_probs))
-    
-    def test_evaluate_actions_log_probs_bayesian(self):
-        """Test evaluation of action log probabilities with Bayesian outputs."""
-        # Create Bayesian network outputs
+    def test_interpret_batch(self):
+        """Test interpret method with batch input."""
         network_outputs = {
-            'alphas': torch.tensor([[
-                [8.0, 1.0, 1.0],  # Strong sell
-                [1.0, 8.0, 1.0],  # Strong hold
-                [1.0, 1.0, 8.0]   # Strong buy
-            ]]),
-            'betas': torch.tensor([[
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0]
-            ]])
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
         }
-        
-        # Test single action
-        actions = torch.tensor([-1, 0, 1])  # sell, hold, buy
-        scaled_actions, log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, actions)
-        
-        # Check shapes
-        self.assertEqual(scaled_actions.shape, (3,))
-        self.assertEqual(log_probs.shape, (3,))
-        
-        # Check scaled actions
-        self.assertEqual(scaled_actions[0].item(), -10)  # sell
-        self.assertEqual(scaled_actions[1].item(), 0)    # hold
-        self.assertEqual(scaled_actions[2].item(), 10)   # buy
-        
-        # Check log probabilities
-        probs = network_outputs['alphas'] / (network_outputs['alphas'] + network_outputs['betas'])
-        expected_log_probs = torch.log(probs[0, torch.arange(3), torch.tensor([0, 1, 2])])
-        self.assertTrue(torch.allclose(log_probs, expected_log_probs))
-        
-        # Test batch of actions
+        scaled_actions, action_choices = self.interpreter.interpret(network_outputs, deterministic=True)
+        self.assertEqual(scaled_actions.shape, (2, 3))
+        self.assertEqual(action_choices.shape, (2, 3))
+        self.assertTrue(torch.all(torch.isin(scaled_actions, torch.tensor([-10, 0, 10]))))
+        self.assertTrue(torch.all(torch.isin(action_choices, torch.tensor([-1, 0, 1]))))
+
+    def test_get_q_values_batch(self):
+        """Test get_q_values with batch input."""
+        network_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
+        }
+        actions = torch.tensor([[-1, 0, 1], [1, -1, 0]])
+        q_values = self.interpreter.get_q_values(network_outputs, actions)
+        self.assertEqual(q_values.shape, (2, 3))
+        self.assertTrue(torch.allclose(q_values[0], torch.tensor([0.8, 0.8, 0.8]), atol=1e-6))
+        self.assertTrue(torch.allclose(q_values[1], torch.tensor([0.8, 0.8, 0.8]), atol=1e-6))
+
+    def test_get_max_q_values_batch(self):
+        """Test get_max_q_values with batch input."""
+        network_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
+        }
+        max_q_values = self.interpreter.get_max_q_values(network_outputs)
+        self.assertEqual(max_q_values.shape, (2, 3))
+        self.assertTrue(torch.allclose(max_q_values[0], torch.tensor([0.8, 0.8, 0.8]), atol=1e-6))
+        self.assertTrue(torch.allclose(max_q_values[1], torch.tensor([0.8, 0.8, 0.8]), atol=1e-6))
+
+    def test_interpret_with_log_prob_batch(self):
+        """Test interpret_with_log_prob with batch input."""
+        network_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
+        }
+        scaled_actions, action_choices, log_probs = self.interpreter.interpret_with_log_prob(network_outputs)
+        self.assertEqual(scaled_actions.shape, (2, 3))
+        self.assertEqual(action_choices.shape, (2, 3))
+        self.assertEqual(log_probs.shape, (2, 3))
+        self.assertTrue(torch.all(torch.isin(scaled_actions, torch.tensor([-10, 0, 10]))))
+        self.assertTrue(torch.all(torch.isin(action_choices, torch.tensor([-1, 0, 1]))))
+        self.assertTrue(torch.all(log_probs <= 0))
+
+    def test_scale_actions_batch(self):
+        """Test scale_actions with batch input."""
         batch_actions = torch.tensor([[-1, 0, 1], [1, -1, 0]])
-        batch_scaled, batch_log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, batch_actions)
-        
-        # Check shapes
+        batch_scaled = self.interpreter.scale_actions(batch_actions)
         self.assertEqual(batch_scaled.shape, (2, 3))
-        self.assertEqual(batch_log_probs.shape, (2, 3))
-        
-        # Check scaled actions
+        self.assertEqual(batch_scaled.dtype, torch.int64)
         self.assertTrue(torch.all(batch_scaled[0] == torch.tensor([-10, 0, 10])))
         self.assertTrue(torch.all(batch_scaled[1] == torch.tensor([10, -10, 0])))
-        
-        # Check log probabilities
-        expected_batch_log_probs = torch.log(probs[0, torch.arange(3), torch.tensor([0, 1, 2])]).repeat(2, 1)
-        self.assertTrue(torch.allclose(batch_log_probs, expected_batch_log_probs))
+
+    def test_evaluate_actions_log_probs_batch(self):
+        """Test evaluate_actions_log_probs with batch input."""
+        network_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
+        }
+        actions = torch.tensor([[-1, 0, 1], [1, -1, 0]])
+        log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, actions)
+        self.assertEqual(log_probs.shape, (2, 3))
+        # Check log probabilities for first batch
+        expected_log_probs_0 = torch.log(torch.tensor([0.8, 0.8, 0.8]))
+        self.assertTrue(torch.allclose(log_probs[0], expected_log_probs_0, atol=1e-6))
+        # Check log probabilities for second batch
+        expected_log_probs_1 = torch.log(torch.tensor([0.8, 0.8, 0.8]))
+        self.assertTrue(torch.allclose(log_probs[1], expected_log_probs_1, atol=1e-6))
+
+    def test_compute_loss(self):
+        """Test compute_loss with non-batched (single sample) inputs."""
+        current_outputs = {
+            'action_probs': torch.tensor([
+                [0.8, 0.1, 0.1],
+                [0.1, 0.8, 0.1],
+                [0.1, 0.1, 0.8]
+            ])
+        }
+        target_outputs = {
+            'action_probs': torch.tensor([
+                [0.1, 0.1, 0.8],
+                [0.8, 0.1, 0.1],
+                [0.1, 0.8, 0.1]
+            ])
+        }
+        action_choice = torch.tensor([-1, 0, 1])
+        rewards = torch.tensor([1.0, -0.5, 0.5])
+        dones = torch.tensor([0, 0, 1])
+        gamma = 0.99
+        loss = self.interpreter.compute_loss(current_outputs, target_outputs, action_choice, rewards, dones, gamma)
+        self.assertEqual(loss.dim(), 0)
+        self.assertTrue(torch.isfinite(loss))
+
+    def test_compute_loss_batch(self):
+        """Test compute_loss with batched inputs."""
+        current_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ],
+                [  # Second batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ]
+            ])
+        }
+        target_outputs = {
+            'action_probs': torch.tensor([
+                [  # First batch
+                    [0.1, 0.1, 0.8],
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1]
+                ],
+                [  # Second batch
+                    [0.8, 0.1, 0.1],
+                    [0.1, 0.8, 0.1],
+                    [0.1, 0.1, 0.8]
+                ]
+            ])
+        }
+        action_choice = torch.tensor([[-1, 0, 1], [1, -1, 0]])
+        rewards = torch.tensor([1.0, -0.5])
+        dones = torch.tensor([0, 1])
+        gamma = 0.99
+        loss = self.interpreter.compute_loss(current_outputs, target_outputs, action_choice, rewards, dones, gamma)
+        self.assertEqual(loss.dim(), 0)
+        self.assertTrue(torch.isfinite(loss))
 
 if __name__ == '__main__':
     unittest.main() 
