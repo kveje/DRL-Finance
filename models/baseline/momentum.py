@@ -4,16 +4,16 @@ from typing import Dict, List, Tuple, Any
 
 class MomentumStrategy:
     """
-    Momentum trading strategy that buys assets that have performed well over 
-    a specified lookback period and sells those that haven't.
+    Momentum trading strategy based on relative strength comparison.
+    Implements the thesis formulation with proper momentum scoring and position sizing.
     """
     
     def __init__(self, 
                  assets: List[str], 
                  initial_capital: float = 10000.0,
-                 lookback_period: int = 20,
-                 top_n: int = 2,
-                 rebalance_frequency: int = 5,
+                 lookback_period: int = 20,  # τ in thesis notation
+                 top_k: int = 2,  # k in thesis notation (number of top assets to hold)
+                 rebalance_frequency: int = 20,  # How often to rebalance (in days)
                  transaction_cost: float = 0.001):
         """
         Initialize the Momentum strategy.
@@ -21,15 +21,15 @@ class MomentumStrategy:
         Args:
             assets: List of asset tickers to trade
             initial_capital: Starting capital
-            lookback_period: Number of days to look back for momentum calculation
-            top_n: Number of top performing assets to hold
+            lookback_period: Lookback period τ for momentum calculation
+            top_k: Number of top performing assets to hold (k in thesis)
             rebalance_frequency: How often to rebalance the portfolio (in days)
             transaction_cost: Cost of transaction as a fraction of trade value
         """
         self.assets = assets
         self.initial_capital = initial_capital
-        self.lookback_period = lookback_period
-        self.top_n = min(top_n, len(assets))  # Can't be more than number of assets
+        self.lookback_period = lookback_period  # τ
+        self.top_k = min(top_k, len(assets))  # k (can't be more than number of assets)
         self.rebalance_frequency = rebalance_frequency
         self.transaction_cost = transaction_cost
         
@@ -49,66 +49,164 @@ class MomentumStrategy:
         self.position_history = []
         self.price_history = {asset: [] for asset in self.assets}
     
-    def calculate_momentum(self) -> Dict[str, float]:
+    def initial_allocation(self, prices: Dict[str, float]):
         """
-        Calculate momentum scores for each asset.
+        Allocate initial capital equally across all assets.
+        This ensures the strategy starts with positions rather than holding cash.
+        
+        Args:
+            prices: Dictionary mapping assets to their current prices
+        """
+        # Equal weight allocation across all available assets
+        available_assets = [asset for asset in self.assets if asset in prices]
+        if not available_assets:
+            return
+            
+        allocation_per_asset = 1.0 / len(available_assets)
+        
+        for asset in available_assets:
+            # Calculate shares to buy
+            amount_to_invest = self.cash * allocation_per_asset
+            shares = int(amount_to_invest / prices[asset])
+            
+            # Execute purchase
+            cost = shares * prices[asset]
+            transaction_fee = cost * self.transaction_cost
+            total_cost = cost + transaction_fee
+            
+            if total_cost <= self.cash:
+                self.positions[asset] = shares
+                self.cash -= total_cost
+
+    def calculate_momentum_scores(self) -> Dict[str, float]:
+        """
+        Calculate momentum scores for each asset based on thesis formulation:
+        M_i(t, τ) = P_i(t) / P_i(t-τ) - 1
         
         Returns:
-            Dictionary mapping assets to momentum scores (returns over lookback period)
+            Dictionary mapping assets to momentum scores
         """
         momentum_scores = {}
         
         for asset, prices in self.price_history.items():
-            if len(prices) >= self.lookback_period:
-                # Calculate return over lookback period
-                start_price = prices[-self.lookback_period]
-                end_price = prices[-1]
-                if start_price > 0:  # Avoid division by zero
-                    momentum = (end_price - start_price) / start_price
+            if len(prices) >= self.lookback_period + 1:  # Need τ+1 prices
+                # M_i(t, τ) = P_i(t) / P_i(t-τ) - 1
+                P_t = prices[-1]  # P_i(t)
+                P_t_minus_tau = prices[-(self.lookback_period + 1)]  # P_i(t-τ)
+                
+                if P_t_minus_tau > 0:  # Avoid division by zero
+                    momentum = (P_t / P_t_minus_tau) - 1
                     momentum_scores[asset] = momentum
         
         return momentum_scores
     
-    def rebalance_portfolio(self, prices: Dict[str, float], momentum_scores: Dict[str, float]):
+    def calculate_target_positions(self, prices: Dict[str, float], momentum_scores: Dict[str, float]) -> Dict[str, int]:
         """
-        Rebalance portfolio based on momentum scores.
+        Calculate target positions based on thesis formulation:
+        q_i(t) = floor(V_t / (k * P_i(t))) if i in top-k assets, 0 otherwise
         
         Args:
             prices: Dictionary mapping assets to their current prices
             momentum_scores: Dictionary mapping assets to momentum scores
-        """
-        # Sell all current positions
-        for asset, shares in self.positions.items():
-            if shares > 0 and asset in prices:
-                sell_value = shares * prices[asset]
-                transaction_fee = sell_value * self.transaction_cost
-                self.cash += sell_value - transaction_fee
-                self.positions[asset] = 0
-        
-        # Select top N assets by momentum
-        top_assets = sorted(momentum_scores.keys(), 
-                           key=lambda x: momentum_scores[x], 
-                           reverse=True)[:self.top_n]
-        
-        # Equally allocate cash to top assets
-        if top_assets:
-            amount_per_asset = self.cash / len(top_assets) * 0.99  # Keep some cash as buffer
             
+        Returns:
+            Dictionary mapping assets to target position sizes
+        """
+        target_positions = {asset: 0 for asset in self.assets}
+        
+        # Calculate current portfolio value
+        portfolio_value = self.calculate_portfolio_value(prices)
+        
+        # Select top-k assets by momentum score
+        if len(momentum_scores) >= self.top_k:
+            top_assets = sorted(momentum_scores.keys(), 
+                              key=lambda x: momentum_scores[x], 
+                              reverse=True)[:self.top_k]
+            
+            # Calculate position sizes for top-k assets
             for asset in top_assets:
                 if asset in prices and prices[asset] > 0:
-                    # Calculate shares to buy
-                    shares = int(amount_per_asset / prices[asset])
-                    
-                    if shares > 0:
-                        # Execute purchase
-                        cost = shares * prices[asset]
-                        transaction_fee = cost * self.transaction_cost
-                        total_cost = cost + transaction_fee
-                        
-                        if total_cost <= self.cash:
-                            self.positions[asset] = shares
-                            self.cash -= total_cost
+                    # q_i(t) = floor(V_t / (k * P_i(t)))
+                    target_shares = int(portfolio_value / (self.top_k * prices[asset]))
+                    target_positions[asset] = target_shares
+        
+        return target_positions
     
+    def rebalance_to_targets(self, prices: Dict[str, float], target_positions: Dict[str, int]):
+        """
+        Rebalance portfolio to match target positions.
+        
+        Args:
+            prices: Dictionary mapping assets to their current prices
+            target_positions: Dictionary mapping assets to target position sizes
+        """
+        # First, sell positions that need to be reduced or eliminated
+        for asset in self.assets:
+            if asset not in prices:
+                continue
+                
+            current_shares = self.positions[asset]
+            target_shares = target_positions[asset]
+            
+            if current_shares > target_shares:
+                shares_to_sell = current_shares - target_shares
+                if shares_to_sell > 0:
+                    # Execute sell
+                    sell_value = shares_to_sell * prices[asset]
+                    transaction_fee = sell_value * self.transaction_cost
+                    
+                    self.cash += sell_value - transaction_fee
+                    self.positions[asset] -= shares_to_sell
+        
+        # Then, buy positions that need to be increased
+        for asset in self.assets:
+            if asset not in prices:
+                continue
+                
+            current_shares = self.positions[asset]
+            target_shares = target_positions[asset]
+            
+            if target_shares > current_shares:
+                shares_to_buy = target_shares - current_shares
+                if shares_to_buy > 0:
+                    # Execute purchase
+                    cost = shares_to_buy * prices[asset]
+                    transaction_fee = cost * self.transaction_cost
+                    total_cost = cost + transaction_fee
+                    
+                    if total_cost <= self.cash:
+                        self.positions[asset] += shares_to_buy
+                        self.cash -= total_cost
+                    else:
+                        # Buy as many as we can afford
+                        affordable_shares = int(self.cash / (prices[asset] * (1 + self.transaction_cost)))
+                        if affordable_shares > 0:
+                            cost = affordable_shares * prices[asset]
+                            transaction_fee = cost * self.transaction_cost
+                            total_cost = cost + transaction_fee
+                            
+                            self.positions[asset] += affordable_shares
+                            self.cash -= total_cost
+
+    def calculate_portfolio_value(self, prices: Dict[str, float]) -> float:
+        """
+        Calculate current portfolio value.
+        
+        Args:
+            prices: Dictionary mapping assets to their current prices
+            
+        Returns:
+            Total portfolio value
+        """
+        portfolio_value = self.cash
+        
+        for asset, shares in self.positions.items():
+            if asset in prices:
+                asset_value = shares * prices[asset]
+                portfolio_value += asset_value
+        
+        return portfolio_value
+
     def step(self, 
              current_step: int, 
              prices: Dict[str, float], 
@@ -124,6 +222,10 @@ class MomentumStrategy:
         Returns:
             Dict containing current positions, cash, and portfolio value
         """
+        # Initial allocation on first step
+        if current_step == 0:
+            self.initial_allocation(prices)
+        
         # Update price history
         for asset, price in prices.items():
             if asset in self.price_history:
@@ -133,21 +235,16 @@ class MomentumStrategy:
         if (current_step >= self.lookback_period and 
             current_step % self.rebalance_frequency == 0):
             
-            momentum_scores = self.calculate_momentum()
+            momentum_scores = self.calculate_momentum_scores()
             
-            # Only rebalance if we have scores for at least top_n assets
-            if len(momentum_scores) >= self.top_n:
-                self.rebalance_portfolio(prices, momentum_scores)
+            # Only rebalance if we have scores for at least top_k assets
+            if len(momentum_scores) >= self.top_k:
+                target_positions = self.calculate_target_positions(prices, momentum_scores)
+                self.rebalance_to_targets(prices, target_positions)
         
         # Calculate portfolio value
-        portfolio_value = self.cash
-        current_positions = {}
-        
-        for asset, shares in self.positions.items():
-            if asset in prices:
-                asset_value = shares * prices[asset]
-                portfolio_value += asset_value
-                current_positions[asset] = shares
+        portfolio_value = self.calculate_portfolio_value(prices)
+        current_positions = {asset: shares for asset, shares in self.positions.items() if shares != 0}
         
         # Record history
         self.portfolio_value_history.append(portfolio_value)

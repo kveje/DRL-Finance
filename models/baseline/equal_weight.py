@@ -6,6 +6,10 @@ class EqualWeightStrategy:
     """
     Equal Weight (1/N) strategy that allocates capital equally across all assets
     and rebalances the portfolio periodically.
+    
+    Implements the thesis formulation:
+    q_i(t_k^+) = floor(V_tk / (n * P_i(t_k)))
+    where V_tk = C_tk + sum(q_i(t_k^-) * P_i(t_k))
     """
     
     def __init__(self, 
@@ -39,17 +43,46 @@ class EqualWeightStrategy:
         self.portfolio_value_history = []
         self.position_history = []
     
+    def calculate_portfolio_value_before_rebalancing(self, prices: Dict[str, float]) -> float:
+        """
+        Calculate portfolio value before rebalancing as per thesis:
+        V_tk = C_tk + sum(q_i(t_k^-) * P_i(t_k))
+        
+        Args:
+            prices: Dictionary mapping assets to their current prices
+            
+        Returns:
+            Total portfolio value before rebalancing
+        """
+        portfolio_value = self.cash  # C_tk
+        
+        # Add value of current positions: sum(q_i(t_k^-) * P_i(t_k))
+        for asset, shares in self.positions.items():
+            if asset in prices and shares > 0:
+                asset_value = shares * prices[asset]
+                portfolio_value += asset_value
+        
+        return portfolio_value
+    
     def rebalance_portfolio(self, prices: Dict[str, float]):
         """
-        Rebalance portfolio to equal weights.
+        Rebalance portfolio to equal weights using thesis formulation:
+        q_i(t_k^+) = floor(V_tk / (n * P_i(t_k)))
         
         Args:
             prices: Dictionary mapping assets to their current prices
         """
-        # Calculate current portfolio value
-        portfolio_value = self.calculate_portfolio_value(prices)
+        # Calculate portfolio value before rebalancing (V_tk)
+        portfolio_value_before = self.calculate_portfolio_value_before_rebalancing(prices)
         
-        # First sell all positions to get a clean slate
+        # Count valid assets (those with prices)
+        valid_assets = [asset for asset in self.assets if asset in prices and prices[asset] > 0]
+        n_assets = len(valid_assets)
+        
+        if n_assets == 0:
+            return
+        
+        # First, liquidate all current positions to cash
         for asset, shares in self.positions.items():
             if shares > 0 and asset in prices:
                 sell_value = shares * prices[asset]
@@ -57,33 +90,34 @@ class EqualWeightStrategy:
                 self.cash += sell_value - transaction_fee
                 self.positions[asset] = 0
         
-        # Count valid assets (those with prices)
-        valid_assets = [asset for asset in self.assets if asset in prices and prices[asset] > 0]
-        
-        if not valid_assets:
-            return
-        
-        # Calculate equal allocation
-        amount_per_asset = self.cash / len(valid_assets) * 0.99  # Keep some cash as buffer
-        
-        # Buy shares according to equal allocation
+        # Calculate target positions using thesis formula
+        target_positions = {}
         for asset in valid_assets:
-            current_price = prices[asset]
-            if current_price <= 0:
-                continue
-                
-            # Calculate shares to buy
-            shares = int(amount_per_asset / current_price)
-            
-            if shares > 0:
+            # q_i(t_k^+) = floor(V_tk / (n * P_i(t_k)))
+            target_shares = int(portfolio_value_before / (n_assets * prices[asset]))
+            target_positions[asset] = target_shares
+        
+        # Execute purchases to reach target positions
+        for asset, target_shares in target_positions.items():
+            if target_shares > 0 and asset in prices:
                 # Execute purchase
-                cost = shares * current_price
+                cost = target_shares * prices[asset]
                 transaction_fee = cost * self.transaction_cost
                 total_cost = cost + transaction_fee
                 
                 if total_cost <= self.cash:
-                    self.positions[asset] = shares
+                    self.positions[asset] = target_shares
                     self.cash -= total_cost
+                else:
+                    # Buy as many as we can afford
+                    affordable_shares = int(self.cash / (prices[asset] * (1 + self.transaction_cost)))
+                    if affordable_shares > 0:
+                        cost = affordable_shares * prices[asset]
+                        transaction_fee = cost * self.transaction_cost
+                        total_cost = cost + transaction_fee
+                        
+                        self.positions[asset] = affordable_shares
+                        self.cash -= total_cost
     
     def calculate_portfolio_value(self, prices: Dict[str, float]) -> float:
         """
