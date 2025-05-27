@@ -44,7 +44,7 @@ class ConstraintViolationReward(BaseReward):
     def get_parameters(self) -> Dict[str, Any]:
         """Get the reward parameters."""
         return {
-            "penalty_scale": self.penalty_scale
+            "scale": self.scale
         } 
     
     def reset(self):
@@ -53,7 +53,7 @@ class ConstraintViolationReward(BaseReward):
 
     def __str__(self) -> str:
         """Return a string representation of the reward function."""
-        return f"ConstraintViolationReward(penalty_scale={self.penalty_scale})"
+        return f"ConstraintViolationReward(scale={self.scale})"
     
     def __repr__(self) -> str:
         return self.__str__()
