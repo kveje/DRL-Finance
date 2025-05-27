@@ -12,8 +12,8 @@ logger = Logger.get_logger()
 
 from models.agents.base_agent import BaseAgent
 from models.action_interpreters.base_action_interpreter import BaseActionInterpreter
-from environments.trading_env import TradingEnv
-from ..networks.unified_network import UnifiedNetwork
+from models.networks.unified_network import UnifiedNetwork
+from models.agents.temperature_manager import TemperatureManager
 
 class A2CAgent(BaseAgent):
     """
@@ -23,9 +23,10 @@ class A2CAgent(BaseAgent):
     
     def __init__(
         self,
-        env: TradingEnv,
         network_config: Dict[str, Any],
         interpreter: BaseActionInterpreter,
+        temperature_manager: TemperatureManager,
+        update_frequency: int,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         learning_rate: float = 0.0007,
         gamma: float = 0.99,
@@ -38,7 +39,6 @@ class A2CAgent(BaseAgent):
         Initialize the A2C agent.
         
         Args:
-            env: Trading environment instance
             network_config: Configuration for the unified network
             interpreter: Action interpreter instance
             device: Device to run the agent on
@@ -49,7 +49,7 @@ class A2CAgent(BaseAgent):
             max_grad_norm: Maximum gradient norm for clipping
             **kwargs: Additional arguments
         """
-        super().__init__(env, network_config, interpreter, device)
+        super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
         
         # Hyperparameters
         self.gamma = gamma
@@ -269,7 +269,7 @@ class A2CAgent(BaseAgent):
         Args:
             path: Base path to load the models from
         """
-        checkpoint = torch.load(os.path.join(path, 'agent_state.pth'))
+        checkpoint = torch.load(os.path.join(path, 'agent_state.pth'), weights_only=False)
         self.network.load_state_dict(checkpoint['network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.steps = checkpoint['steps']

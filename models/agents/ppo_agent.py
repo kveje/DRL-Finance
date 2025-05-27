@@ -11,10 +11,8 @@ from utils.logger import Logger
 logger = Logger.get_logger()
 
 from models.agents.base_agent import BaseAgent
-from environments.trading_env import TradingEnv
 from models.action_interpreters.base_action_interpreter import BaseActionInterpreter
-from ..networks.unified_network import UnifiedNetwork
-
+from models.agents.temperature_manager import TemperatureManager
 
 class PPOAgent(BaseAgent):
     """
@@ -24,9 +22,10 @@ class PPOAgent(BaseAgent):
     
     def __init__(
         self,
-        env: TradingEnv,
         network_config: Dict[str, Any],
         interpreter: BaseActionInterpreter,
+        temperature_manager: TemperatureManager,
+        update_frequency: int,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         learning_rate: float = 0.0003,
         gamma: float = 0.99,
@@ -43,9 +42,10 @@ class PPOAgent(BaseAgent):
         Initialize the PPO agent.
         
         Args:
-            env: Trading environment instance
             network_config: Configuration for the unified network
             interpreter: Action interpreter instance
+            temperature_manager: Temperature manager instance
+            update_frequency: Update frequency for the temperature manager
             device: Device to run the agent on
             learning_rate: Learning rate for the optimizer
             gamma: Discount factor
@@ -58,7 +58,7 @@ class PPOAgent(BaseAgent):
             batch_size: Mini-batch size for PPO update
             **kwargs: Additional arguments
         """
-        super().__init__(env, network_config, interpreter, device)
+        super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
         
         # Hyperparameters
         self.gamma = gamma
@@ -120,18 +120,14 @@ class PPOAgent(BaseAgent):
                 else:
                     cpu_outputs[key] = value
             
-            # Sample from policy or take most likely action
+            # Take deterministic action
             if deterministic:
-                scaled_action = self.interpreter.interpret(cpu_outputs, current_position, deterministic=True)
-                action_choice = self.interpreter.get_action_choice(cpu_outputs, deterministic=True)
+                scaled_action, action_choice = self.interpreter.interpret(cpu_outputs, current_position, deterministic=True)
             else:
-                scaled_action, log_probs = self.interpreter.interpret_with_log_prob(cpu_outputs, current_position)
-                action_choice = self.interpreter.get_action_choice(cpu_outputs, deterministic=False)
-                # Convert log_probs to a PyTorch tensor if it's not already one
-                if not isinstance(log_probs, torch.Tensor):
-                    self.last_log_probs = torch.tensor(log_probs, device=self.device)
-                else:
-                    self.last_log_probs = log_probs
+                scaled_action, action_choice, log_probs = self.interpreter.interpret_with_log_prob(cpu_outputs, current_position)
+                
+                # Store log probabilities for training
+                self.last_log_probs = log_probs
             
         return scaled_action, action_choice
     
@@ -247,7 +243,7 @@ class PPOAgent(BaseAgent):
                 batch_values = outputs["value"]
                 
                 # Get current log probabilities
-                _, batch_new_log_probs = self.interpreter.evaluate_actions_log_probs(
+                batch_new_log_probs = self.interpreter.evaluate_actions_log_probs(
                     outputs, batch_actions
                 )
                 
@@ -325,7 +321,7 @@ class PPOAgent(BaseAgent):
         Args:
             path: Base path to load the models from
         """
-        checkpoint = torch.load(os.path.join(path, 'agent_state.pth'))
+        checkpoint = torch.load(os.path.join(path, 'agent_state.pth'), weights_only=False)
         self.network.load_state_dict(checkpoint['network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.steps = checkpoint['steps']

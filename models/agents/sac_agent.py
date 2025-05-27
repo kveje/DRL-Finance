@@ -11,10 +11,11 @@ from utils.logger import Logger
 logger = Logger.get_logger()
 
 from models.agents.base_agent import BaseAgent
-from models.networks.unified_network import UnifiedNetwork
 from models.action_interpreters.base_action_interpreter import BaseActionInterpreter
+from models.networks.unified_network import UnifiedNetwork
 from models.agents.temperature_manager import TemperatureManager
 
-class DDPGAgent(BaseAgent):
-    def __init__(self, network_config: Dict[str, Any], interpreter: BaseActionInterpreter, temperature_manager: TemperatureManager, update_frequency: int, device: torch.device):
-        super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
+
+class SACAgent(BaseAgent):
+    def __init__(self, network_config: Dict[str, Any], temperature_manager: TemperatureManager, interpreter: BaseActionInterpreter, update_frequency: int, device: str = "cuda" if torch.cuda.is_available() else "cpu", **kwargs):
+        super().__init__(network_config, interpreter, temperature_manager, update_frequency, device, **kwargs)

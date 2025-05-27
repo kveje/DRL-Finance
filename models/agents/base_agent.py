@@ -1,12 +1,12 @@
 """Base class for all agents"""
 
 from abc import ABC, abstractmethod
-from environments.base_env import BaseTradingEnv
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-from ..networks.unified_network import UnifiedNetwork
-from ..action_interpreters.base_action_interpreter import BaseActionInterpreter
+from models.networks.unified_network import UnifiedNetwork
+from models.action_interpreters.base_action_interpreter import BaseActionInterpreter
+from models.agents.temperature_manager import TemperatureManager
 
 class BaseAgent(ABC):
     """
@@ -16,9 +16,10 @@ class BaseAgent(ABC):
     
     def __init__(
         self,
-        env: BaseTradingEnv,
         network_config: Dict[str, Any],
         interpreter: BaseActionInterpreter,
+        temperature_manager: TemperatureManager,
+        update_frequency: int,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         **kwargs
     ):
@@ -26,15 +27,15 @@ class BaseAgent(ABC):
         Initialize the base agent.
         
         Args:
-            env: Trading environment instance
             network_config: Configuration for the unified network
             interpreter: Action interpreter instance to use
             device: Device to run the agent on
             **kwargs: Additional arguments specific to the agent implementation
         """
-        self.env = env
         self.device = device
         self.interpreter = interpreter
+        self.temperature_manager = temperature_manager
+        self.update_frequency = update_frequency
         
         # Initialize unified network
         self.network = UnifiedNetwork(network_config, device=device)
@@ -48,17 +49,17 @@ class BaseAgent(ABC):
     @abstractmethod
     def get_intended_action(
         self,
-        observations: Dict[str, torch.Tensor],
-        current_position: np.ndarray,
-        deterministic: bool = True
+        observations: Dict[str, np.ndarray],
+        deterministic: bool = True,
+        sample: bool = True
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Select an action based on the current state.
         
         Args:
-            observations: Dictionary of observation tensors for each processor
-            current_position: Current position of the agent
+            observations: Dictionary of observation numpy arrays for each processor
             deterministic: Whether to use deterministic action selection
+            sample: Whether to sample from the distribution
             
         Returns:
             Tuple of (scaled_action, action_choice) where:
@@ -68,12 +69,12 @@ class BaseAgent(ABC):
         pass
     
     @abstractmethod
-    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+    def update(self, **kwargs) -> Dict[str, float]:
         """
         Update the agent's networks using a batch of experience.
         
         Args:
-            batch: Dictionary containing experience data
+            **kwargs: Additional arguments specific to the agent implementation
             
         Returns:
             Dictionary of training metrics
@@ -166,5 +167,38 @@ class BaseAgent(ABC):
         """Get the agent's configuration."""
         return {
             "network_config": self.network_config,
-            "device": self.device
+            "device": self.device,
+            "update_frequency": self.update_frequency,
         }
+    
+    def add_to_rollout(
+        self,
+        observation: Dict[str, np.ndarray],
+        action: np.ndarray,
+        action_choice: np.ndarray,
+        reward: float,
+        next_observation: Dict[str, np.ndarray],
+        done: bool) -> None:
+        """
+        Add experience to the rollout buffer.
+        """
+        raise NotImplementedError("This method should be implemented by the agent subclass.")
+    
+    def add_to_memory(
+        self,
+        observation: Dict[str, np.ndarray],
+        action: np.ndarray,
+        action_choice: np.ndarray,
+        reward: float,
+        next_observation: Dict[str, np.ndarray],
+        done: bool) -> None:
+        """
+        Add experience to the memory buffer.
+        """
+        raise NotImplementedError("This method should be implemented by the agent subclass.")
+    
+    def sufficient_memory(self) -> bool:
+        """Check if the agent has enough memory."""
+        raise NotImplementedError("This method should be implemented by the agent subclass.")
+    
+    

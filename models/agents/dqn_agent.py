@@ -1,9 +1,10 @@
 import numpy as np
 import torch
+from tensordict import TensorDict
 import torch.nn as nn
 import torch.optim as optim
 from typing import Dict, List, Optional, Tuple, Union, Any
-from collections import deque
+from torchrl.data import ReplayBuffer, LazyTensorStorage
 import random
 import os
 
@@ -12,12 +13,9 @@ logger = Logger.get_logger()
 
 
 from models.agents.base_agent import BaseAgent
-from models.action_interpreters.discrete_interpreter import DiscreteInterpreter
-from models.action_interpreters.confidence_scaled_interpreter import ConfidenceScaledInterpreter
-from environments.trading_env import TradingEnv
-from .base_agent import BaseAgent
-from ..networks.unified_network import UnifiedNetwork
-from ..action_interpreters.base_action_interpreter import BaseActionInterpreter
+from models.networks.unified_network import UnifiedNetwork
+from models.action_interpreters.base_action_interpreter import BaseActionInterpreter
+from models.agents.temperature_manager import TemperatureManager
 
 class DQNAgent(BaseAgent):
     """
@@ -26,16 +24,17 @@ class DQNAgent(BaseAgent):
     """
     def __init__(
         self,
-        env: Any,
         network_config: Dict[str, Any],
         interpreter: BaseActionInterpreter,
+        temperature_manager: TemperatureManager,
+        update_frequency: int,
         device: str = "cuda",
-        memory_size: int = 100000,
-        batch_size: int = 64,
+        memory_size: int = 10000,
+        batch_size: int = 128,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
+        epsilon_decay: float = 0.999,
         target_update: int = 10,
         learning_rate: float = 0.001,
         use_bayesian: bool = False,
@@ -45,9 +44,10 @@ class DQNAgent(BaseAgent):
         Initialize the DQN agent.
         
         Args:
-            env: Trading environment instance
             network_config: Configuration for the unified network
             interpreter: Action interpreter instance
+            temperature_manager: Temperature manager instance
+            update_frequency: Update frequency for the temperature manager
             device: Device to run the agent on
             memory_size: Size of the replay memory
             batch_size: Batch size for training
@@ -60,7 +60,7 @@ class DQNAgent(BaseAgent):
             use_bayesian: Whether to use Bayesian heads for exploration
             **kwargs: Additional arguments
         """
-        super().__init__(env, network_config, interpreter, device)
+        super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
         
         # DQN specific parameters
         self.memory_size = memory_size
@@ -75,7 +75,12 @@ class DQNAgent(BaseAgent):
         self.use_bayesian = use_bayesian
         
         # Initialize replay memory
-        self.memory = deque(maxlen=memory_size)
+        self.memory_device = "cpu"
+        self.memory = ReplayBuffer(
+            storage=LazyTensorStorage(max_size=memory_size,
+                                      device=self.memory_device),
+            batch_size=batch_size,
+        )
         
         # Create target network
         self.target_network = UnifiedNetwork(network_config, device=device)
@@ -89,67 +94,65 @@ class DQNAgent(BaseAgent):
     
     def get_intended_action(
         self,
-        observations: Dict[str, torch.Tensor],
-        current_position: np.ndarray,
-        deterministic: bool = True
+        observations: Dict[str, np.ndarray],
+        deterministic: bool = True,
+        sample: bool = True
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Select an action using epsilon-greedy policy.
         
         Args:
-            observations: Dictionary of observation tensors
-            current_position: Current position array
+            observations: Dictionary of observation numpy arrays
             deterministic: Whether to use deterministic action selection
-            
+            sample: Whether to sample from the distribution
+
         Returns:
-            Tuple of (scaled_action, action_choice) where:
+            Tuple of (scaled_action, action_choices) where:
             - scaled_action is the actual action to execute
-            - action_choice is the unscaled action (-1,0,1) for learning
+            - action_choices is the unscaled action (-1,0,1) for learning
         """
-        # Convert observations to tensors if needed
+        # Convert observations to tensors
         obs_tensors = {
             k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
             for k, v in observations.items()
         }
         
+        use_sampling = self.use_bayesian and sample
         # Get network outputs
         with torch.no_grad():
-            network_outputs = self.network(obs_tensors, use_sampling=not deterministic and self.use_bayesian)
+            # Use sampling if not deterministic and Bayesian is enabled
+            network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature = self.temperature_manager.get_all_temperatures())
         
+        # Move the network outputs to cpu
+        network_outputs = {k: v.cpu() for k, v in network_outputs.items()}
+
         # Epsilon-greedy action selection
         if not deterministic and random.random() < self.epsilon:
-            # Let the interpreter handle random action generation
-            scaled_action = self.interpreter.interpret(
-                network_outputs=None,  # Signal to interpreter to generate random actions
-                current_position=current_position,
-                deterministic=False
-            )
-            action_choice = self.interpreter.get_action_choice(
-                network_outputs=None,
+            scaled_action, action_choice = self.interpreter.interpret(
+                network_outputs=network_outputs,
                 deterministic=False
             )
         else:
             # Use interpreter to convert network outputs to actions
-            scaled_action = self.interpreter.interpret(
-                network_outputs=network_outputs,
-                current_position=current_position,
-                deterministic=True
-            )
-            action_choice = self.interpreter.get_action_choice(
+            scaled_action, action_choice = self.interpreter.interpret(
                 network_outputs=network_outputs,
                 deterministic=True
             )
+
+        # Convert to numpy
+        scaled_action = scaled_action.numpy()
+        action_choice = action_choice.numpy()
         
         return scaled_action, action_choice
     
-    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+    def update(self) -> Dict[str, float]:
         """
         Update the network using a batch of experience.
         
         Args:
             batch: Dictionary containing:
                 - observations: Dict of observation tensors
-                - actions: Action indices tensor
+                - actions: Action choices tensor
                 - rewards: Reward tensor
                 - next_observations: Dict of next observation tensors
                 - dones: Done flag tensor
@@ -157,55 +160,40 @@ class DQNAgent(BaseAgent):
         Returns:
             Dictionary of training metrics
         """
+
+        # Get batch from memory
+        batch = self.get_batch()
+
         # Extract batch data
-        obs = batch['observations']
-        actions = batch['actions']
-        rewards = batch['rewards']
-        next_obs = batch['next_observations']
-        dones = batch['dones']
+        obs = batch['observations'] # Dict {"process_str": tensor[batch_size, ...], ...}
+        action_choices = batch['actions'] # Tensor [batch_size, 1]
+        rewards = batch['rewards'] # Tensor [batch_size, 1]
+        next_obs = batch['next_observations'] # Dict {"process_str": tensor[batch_size, ...], ...}
+        dones = batch['dones'] # Tensor [batch_size, 1]
+
+        # Move the batch to the device
+        obs = {k: v.to(self.device) for k, v in obs.items()}
+        action_choices = action_choices.to(self.device)
+        rewards = rewards.to(self.device)
+        next_obs = {k: v.to(self.device) for k, v in next_obs.items()}
+        dones = dones.to(self.device)
         
         # Get current network outputs
-        current_outputs = self.network(obs)
-        
-        # Validate network outputs
-        if not isinstance(current_outputs, dict):
-            raise ValueError("Network outputs must be a dictionary")
-        
-        # Check for required outputs based on interpreter type
-        if isinstance(self.interpreter, DiscreteInterpreter):
-            if 'action_probs' not in current_outputs and not ('alphas' in current_outputs and 'betas' in current_outputs):
-                raise ValueError("Network outputs must contain either 'action_probs' or 'alphas' and 'betas'")
-        elif isinstance(self.interpreter, ConfidenceScaledInterpreter):
-            if not (('action_probs' in current_outputs and 'confidences' in current_outputs) or 
-                   ('alphas' in current_outputs and 'betas' in current_outputs)):
-                print(current_outputs)
-                raise ValueError("Network outputs must contain either ('action_probs', 'confidences') or ('alphas', 'betas')")
-        
+        current_outputs = self.network(obs, use_sampling=False, temperature = self.temperature_manager.get_all_temperatures())
+
         # Get target network outputs
         with torch.no_grad():
             target_outputs = self.target_network(next_obs)
             
-            # Validate target outputs
-            if not isinstance(target_outputs, dict):
-                raise ValueError("Target network outputs must be a dictionary")
-            
-            # Check for required outputs based on interpreter type
-            if isinstance(self.interpreter, DiscreteInterpreter):
-                if 'action_probs' not in target_outputs and not ('alphas' in target_outputs and 'betas' in target_outputs):
-                    raise ValueError("Target network outputs must contain either 'action_probs' or 'alphas' and 'betas'")
-            elif isinstance(self.interpreter, ConfidenceScaledInterpreter):
-                if not (('action_probs' in target_outputs and 'confidences' in target_outputs) or 
-                       ('alphas' in target_outputs and 'betas' in target_outputs)):
-                    raise ValueError("Target network outputs must contain either ('action_probs', 'confidences') or ('alphas', 'betas')")
-        
         # Compute loss using the interpreter
         loss = self.interpreter.compute_loss(
             current_outputs=current_outputs,
             target_outputs=target_outputs,
-            actions=actions,
+            action_choices=action_choices,
             rewards=rewards,
             dones=dones,
-            gamma=self.gamma
+            gamma=self.gamma,
+            method="mse"
         )
         
         # Optimize the network
@@ -221,10 +209,6 @@ class DQNAgent(BaseAgent):
         # Decay epsilon
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
         
-        # Update temperature for Bayesian exploration
-        if self.use_bayesian:
-            self.interpreter.update_temperature()
-        
         # Store loss for visualization
         self.last_loss = loss.item()
 
@@ -234,7 +218,7 @@ class DQNAgent(BaseAgent):
         }
 
         if self.use_bayesian:
-            metrics["temperature"] = self.interpreter.get_temperature()
+            metrics.update(self.temperature_manager.get_all_temperatures_printerfriendly())
 
         return metrics
     
@@ -271,17 +255,17 @@ class DQNAgent(BaseAgent):
         Args:
             path: Base path to load the models from
         """
-        # Load main network
-        self.network.load_state_dict(torch.load(os.path.join(path, 'network.pth')))
+        # Load network weights
+        self.network.load_state_dict(torch.load(os.path.join(path, 'network.pth'), weights_only=False))
         
-        # Load target network
-        self.target_network.load_state_dict(torch.load(os.path.join(path, 'target_network.pth')))
+        # Load target network weights
+        self.target_network.load_state_dict(torch.load(os.path.join(path, 'target_network.pth'), weights_only=False))
         
         # Load optimizer state
-        self.optimizer.load_state_dict(torch.load(os.path.join(path, 'optimizer.pth')))
+        self.optimizer.load_state_dict(torch.load(os.path.join(path, 'optimizer.pth'), weights_only=False))
         
         # Load agent state
-        agent_state = torch.load(os.path.join(path, 'agent_state.pth'))
+        agent_state = torch.load(os.path.join(path, 'agent_state.pth'), weights_only=False)
         self.epsilon = agent_state['epsilon']
         self.steps = agent_state['steps']
         if self.use_bayesian and 'temperature' in agent_state:
@@ -335,39 +319,38 @@ class DQNAgent(BaseAgent):
         Args:
             observation: Current observation dictionary
             action: Scaled action taken (from interpret())
-            action_choice: Unscaled action choice (-1,0,1) for learning
+            action_choices: Unscaled action choice (-1,0,1) for learning
             reward: Reward received
             next_observation: Next observation dictionary
             done: Whether the episode is done
         """
+
         # Convert numpy arrays to tensors
         obs_tensors = {
-            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in observation.items()
         }
         next_obs_tensors = {
-            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in next_observation.items()
         }
-        action_tensor = torch.as_tensor(action_choice, device=self.device, dtype=torch.long)
-        reward_tensor = torch.as_tensor(reward, device=self.device, dtype=torch.float32)
-        done_tensor = torch.as_tensor(done, device=self.device, dtype=torch.float32)
-        
-        # Store transition
-        self.memory.append({
+
+        transition = TensorDict({
             'observations': obs_tensors,
-            'actions': action_tensor,  # Store unscaled action choice
-            'rewards': reward_tensor,
+            'actions': torch.as_tensor(action_choice,  dtype=torch.long),
+            'rewards': torch.as_tensor(reward, dtype=torch.float32),
             'next_observations': next_obs_tensors,
-            'dones': done_tensor
-        })
+            'dones': torch.as_tensor(done, dtype=torch.float32)
+        }, device=self.memory_device)
+
+        self.memory.add(transition)
     
-    def get_batch(self) -> Dict[str, torch.Tensor]:
+    def get_batch(self) -> TensorDict:
         """
         Sample a batch of transitions from the replay memory.
         
         Returns:
-            Dictionary containing batched tensors for:
+            TensorDict containing batched tensors for:
             - observations: Dict of observation tensors
             - actions: Action indices tensor
             - rewards: Reward tensor
@@ -376,28 +359,8 @@ class DQNAgent(BaseAgent):
         """
         if len(self.memory) < self.batch_size:
             raise ValueError(f"Not enough samples in memory. Need {self.batch_size}, have {len(self.memory)}")
-        
-        # Sample batch
-        batch_indices = np.random.choice(len(self.memory), self.batch_size, replace=False)
-        batch = [self.memory[i] for i in batch_indices]
-        
-        # Stack tensors
-        batched = {
-            'observations': {},
-            'next_observations': {}
-        }
-        
-        # Stack observations and next_observations
-        for key in batch[0]['observations'].keys():
-            batched['observations'][key] = torch.stack([t['observations'][key] for t in batch])
-            batched['next_observations'][key] = torch.stack([t['next_observations'][key] for t in batch])
-        
-        # Stack other tensors
-        batched['actions'] = torch.stack([t['actions'] for t in batch])
-        batched['rewards'] = torch.stack([t['rewards'] for t in batch])
-        batched['dones'] = torch.stack([t['dones'] for t in batch])
-        
-        return batched
+
+        return self.memory.sample()
 
     def get_info(self) -> Dict[str, Any]:
         """
@@ -415,7 +378,9 @@ class DQNAgent(BaseAgent):
         }
         
         if self.use_bayesian:
-            info['temperature'] = self.interpreter.get_temperature()
+            temperatures = self.temperature_manager.get_all_temperatures_printerfriendly()
+            for key, value in temperatures.items():
+                info[key] = value
         
         return info
 
@@ -426,11 +391,14 @@ class DQNAgent(BaseAgent):
         Returns:
             Dictionary containing DQN-specific state
         """
-        return {
-            'epsilon': self.epsilon,
-            'target_network': self.target_network.state_dict(),
-            'temperature': self.interpreter.get_temperature() if self.use_bayesian else None
-        }
+        state = {}
+        state['epsilon'] = self.epsilon
+        state['target_network'] = self.target_network.state_dict()
+        if self.use_bayesian:
+            steps_info = self.temperature_manager.get_step_info()
+            for key, value in steps_info.items():
+                state[key] = value
+        return state
     
     def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
         """
@@ -442,5 +410,14 @@ class DQNAgent(BaseAgent):
         self.epsilon = state_dict.get('epsilon', self.epsilon)
         if 'target_network_state_dict' in state_dict:
             self.target_network.load_state_dict(state_dict['target_network_state_dict'])
-        if self.use_bayesian and 'temperature' in state_dict:
-            self.interpreter.set_temperature(state_dict['temperature'])
+
+        if self.use_bayesian:
+            steps_info = self.temperature_manager.get_step_info()
+            for key, value in steps_info.items():
+                state_dict[key] = value
+            
+            self.temperature_manager.set_step_info(**steps_info)
+
+    def sufficient_memory(self) -> bool:
+        """Check if the agent has enough memory to perform an update."""
+        return len(self.memory) >= self.batch_size
