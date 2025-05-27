@@ -27,7 +27,10 @@ class ParametricValueHead(BaseHead):
         self.n_assets = n_assets
         
         # Value estimation layer - output single value
-        self.value_layer = nn.Linear(hidden_dim, 1).to(device)
+        self.value_layer = nn.Sequential(
+            nn.Linear(hidden_dim, 1).to(device),
+            nn.Tanh()
+        )
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -56,6 +59,9 @@ class ParametricValueHead(BaseHead):
     
     def get_output_dim(self) -> int:
         return 1  # Single value estimate
+    
+    def update_temperature(self):
+        pass
 
 class BayesianValueHead(BaseHead):
     """Bayesian value head that outputs value distribution parameters."""
@@ -65,7 +71,8 @@ class BayesianValueHead(BaseHead):
         input_dim: int,
         hidden_dim: int,
         n_assets: int,
-        device: str = "cuda"
+        device: str = "cuda",
+        sampling_strategy: str = "thompson"
     ):
         """
         Initialize the Bayesian value head.
@@ -78,9 +85,13 @@ class BayesianValueHead(BaseHead):
         """
         super().__init__(input_dim, hidden_dim, device)
         self.n_assets = n_assets
+        self.sampling_strategy = sampling_strategy
         
         # Distribution parameter layers - output single value
-        self.mean_layer = nn.Linear(hidden_dim, 1).to(device)
+        self.mean_layer = nn.Sequential(
+            nn.Linear(hidden_dim, 1).to(device),
+            nn.Tanh()
+        )
         self.log_std_layer = nn.Linear(hidden_dim, 1).to(device)
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -102,6 +113,7 @@ class BayesianValueHead(BaseHead):
         log_stds = self.log_std_layer(features)
         
         # Ensure positive standard deviation
+        log_stds = torch.clamp(log_stds, min=-10, max=2)
         stds = torch.exp(log_stds)
         
         # Remove batch dimension if input was single sample
@@ -118,7 +130,7 @@ class BayesianValueHead(BaseHead):
     def sample(
         self,
         x: torch.Tensor,
-        strategy: str = "thompson",
+        strategy: Optional[str] = None,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
         """
@@ -135,6 +147,9 @@ class BayesianValueHead(BaseHead):
         dist_params = self.forward(x)
         means = dist_params["mean"]
         stds = dist_params["std"]
+
+        if strategy is None:
+            strategy = self.sampling_strategy
         
         if strategy == "thompson":
             samples = BayesianSampler.thompson_sample(means, stds, **kwargs)
@@ -152,4 +167,5 @@ class BayesianValueHead(BaseHead):
         }
     
     def get_output_dim(self) -> int:
-        return 2  # Mean and std for single value 
+        return 2  # Mean and std for single value
+    

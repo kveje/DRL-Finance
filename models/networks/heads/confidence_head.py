@@ -12,7 +12,7 @@ class ParametricConfidenceHead(BaseHead):
         input_dim: int,
         hidden_dim: int,
         n_assets: int,
-        device: str = "cuda"
+        device: str = "cuda",
     ):
         """
         Initialize the parametric confidence head.
@@ -21,6 +21,7 @@ class ParametricConfidenceHead(BaseHead):
             input_dim: Dimension of input features
             hidden_dim: Hidden dimension for processing
             n_assets: Number of assets
+            sampling_strategy: Sampling strategy ("thompson", "entropy")
             device: Device to run the head on
         """
         super().__init__(input_dim, hidden_dim, device)
@@ -29,6 +30,7 @@ class ParametricConfidenceHead(BaseHead):
         # Confidence estimation layer
         self.confidence_layer = nn.Sequential(
             nn.Linear(hidden_dim, n_assets),
+            nn.LayerNorm(n_assets),
             nn.Sigmoid()  # Ensure confidence is between 0 and 1
         ).to(device)
     
@@ -68,7 +70,8 @@ class BayesianConfidenceHead(BaseHead):
         input_dim: int,
         hidden_dim: int,
         n_assets: int,
-        device: str = "cuda"
+        device: str = "cuda",
+        sampling_strategy: str = "thompson",
     ):
         """
         Initialize the Bayesian confidence head.
@@ -77,10 +80,12 @@ class BayesianConfidenceHead(BaseHead):
             input_dim: Dimension of input features
             hidden_dim: Hidden dimension for processing
             n_assets: Number of assets
+            sampling_strategy: Sampling strategy ("thompson", "entropy")
             device: Device to run the head on
         """
         super().__init__(input_dim, hidden_dim, device)
         self.n_assets = n_assets
+        self.sampling_strategy = sampling_strategy
         
         # Distribution parameter layers
         self.alpha_layer = nn.Linear(hidden_dim, n_assets).to(device)
@@ -126,7 +131,7 @@ class BayesianConfidenceHead(BaseHead):
     def sample(
         self,
         x: torch.Tensor,
-        strategy: str = "thompson",
+        strategy: Optional[str] = None,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
         """
@@ -143,6 +148,9 @@ class BayesianConfidenceHead(BaseHead):
         dist_params = self.forward(x)
         alphas = dist_params["alphas"]
         betas = dist_params["betas"]
+        
+        if strategy is None:
+            strategy = self.sampling_strategy
         
         if strategy == "thompson":
             samples = BayesianSampler.beta_sample(alphas, betas, **kwargs)

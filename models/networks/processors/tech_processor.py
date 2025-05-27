@@ -28,10 +28,10 @@ class TechProcessor(BaseProcessor):
         
         # First process each asset's technical indicators
         self.processor = nn.Sequential(
-            nn.Linear(n_assets * tech_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
+            nn.Linear(n_assets * tech_dim, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.Linear(hidden_dim * 2, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU()
         ).to(device)

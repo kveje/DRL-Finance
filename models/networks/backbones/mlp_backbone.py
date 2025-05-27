@@ -28,8 +28,6 @@ class MLPBackbone(BaseBackbone):
         
         # Extract configuration
         self.hidden_dims = config.get("hidden_dims", [256, 128])
-        self.dropout = config.get("dropout", 0.1)
-        self.use_layer_norm = config.get("use_layer_norm", True)
         
         # Build layers
         layers = []
@@ -38,9 +36,8 @@ class MLPBackbone(BaseBackbone):
         for hidden_dim in self.hidden_dims:
             layers.extend([
                 nn.Linear(prev_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim) if self.use_layer_norm else nn.Identity(),
+                nn.LayerNorm(hidden_dim),
                 nn.ReLU(),
-                nn.Dropout(self.dropout)
             ])
             prev_dim = hidden_dim
         

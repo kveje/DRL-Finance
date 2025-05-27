@@ -9,7 +9,7 @@ class CashProcessor(BaseProcessor):
     def __init__(
         self,
         input_dim: int,  # Usually 2 for [cash_balance, portfolio_value]
-        hidden_dim: int = 32,
+        hidden_dim: int = 16,
         device: str = "cuda"
     ):
         """
@@ -23,7 +23,10 @@ class CashProcessor(BaseProcessor):
         super().__init__(input_dim=input_dim, hidden_dim=hidden_dim, device=device)
         
         self.processor = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, hidden_dim*2),
+            nn.LayerNorm(hidden_dim*2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim*2, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU()
         ).to(device)

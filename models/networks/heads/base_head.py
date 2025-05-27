@@ -11,7 +11,7 @@ class BaseHead(nn.Module):
         self,
         input_dim: int,
         hidden_dim: int,
-        device: str = "cuda"
+        device: str = "cuda",
     ):
         """
         Initialize the base head.
@@ -25,7 +25,7 @@ class BaseHead(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.device = device
-        
+
         # Common processing layers
         self.processor = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -49,3 +49,6 @@ class BaseHead(nn.Module):
         """Get the output dimension of the head."""
         raise NotImplementedError("Subclasses must implement get_output_dim method")
 
+    def update_temperature(self):
+        """Update the temperature of the head."""
+        raise NotImplementedError("Subclasses must implement update_temperature method")

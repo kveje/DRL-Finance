@@ -23,10 +23,10 @@ class CurrentPriceProcessor(BaseProcessor):
         super().__init__(input_dim=n_assets, hidden_dim=hidden_dim, device=device)
         
         self.processor = nn.Sequential(
-            nn.Linear(n_assets, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
+            nn.Linear(n_assets, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.Linear(hidden_dim * 2, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU()
         ).to(device)

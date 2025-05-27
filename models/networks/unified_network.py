@@ -165,7 +165,8 @@ class UnifiedNetwork(nn.Module):
                     input_dim=backbone_output_dim,
                     hidden_dim=value_config.get("hidden_dim", 128),
                     n_assets=self.n_assets,
-                    device=self.device
+                    device=self.device,
+                    sampling_strategy=value_config.get("sampling_strategy", "thompson")
                 )
             else:
                 raise ValueError(f"Unsupported value head type: {head_type}")
@@ -187,7 +188,8 @@ class UnifiedNetwork(nn.Module):
                     input_dim=backbone_output_dim,
                     hidden_dim=discrete_config.get("hidden_dim", 128),
                     n_assets=self.n_assets,
-                    device=self.device
+                    device=self.device,
+                    sampling_strategy=discrete_config.get("sampling_strategy", "thompson")
                 )
             else:
                 raise ValueError(f"Unsupported discrete head type: {head_type}")
@@ -209,27 +211,39 @@ class UnifiedNetwork(nn.Module):
                     input_dim=backbone_output_dim,
                     hidden_dim=confidence_config.get("hidden_dim", 128),
                     n_assets=self.n_assets,
-                    device=self.device
+                    device=self.device,
+                    sampling_strategy=confidence_config.get("sampling_strategy", "thompson")
                 )
             else:
                 raise ValueError(f"Unsupported confidence head type: {head_type}")
     
-    def forward(self, observations: Dict[str, torch.Tensor], use_sampling: bool = False) -> Dict[str, torch.Tensor]:
+    def forward(self, observations: Dict[str, torch.Tensor], use_sampling: bool = False, temperature: Dict[str, float] = None) -> Dict[str, torch.Tensor]:
         """
         Process observations through the network.
         
         Args:
             observations: Dictionary of observation tensors for each processor
             use_sampling: Whether to use sampling for Bayesian heads (default: False)
-            
+            temperature: Dictionary of temperature values for each head
         Returns:
             Dictionary of outputs from each head:
             - For value head: {'value': tensor} of shape (batch_size, 1) or (1,) for single sample
             - For discrete head: {'action_probs': tensor} of shape (batch_size, n_assets, 3) or (n_assets, 3) for single sample
             - For confidence head: {'confidences': tensor} of shape (batch_size, n_assets) or (n_assets,) for single sample
         """
-        if not observations:
+        # Check if observations dictionary has any keys (ONNX-friendly)
+        has_observations = False
+        for key in observations.keys():
+            has_observations = True
+            break
+        
+        if not has_observations:
             raise ValueError("No observations provided")
+        
+        if temperature is None:
+            temperature = {}
+            for key in self.heads.keys():
+                temperature[key] = 1.0
             
         # Process each observation type through its processor
         processed_features = []
@@ -239,7 +253,7 @@ class UnifiedNetwork(nn.Module):
                 processed_features.append(features)
         
         # Concatenate all processed features
-        if not processed_features:
+        if len(processed_features) == 0:
             raise ValueError("No observations provided for any processor")
         
         # Concatenate along the feature dimension
@@ -255,7 +269,7 @@ class UnifiedNetwork(nn.Module):
                 # For value head, process directly
                 if isinstance(head, (BayesianValueHead)):
                     if use_sampling:
-                        head_output = head.sample(backbone_features)
+                        head_output = head.sample(backbone_features, temperature=temperature[name])
                     else:
                         head_output = head(backbone_features)
                 else:
@@ -272,12 +286,12 @@ class UnifiedNetwork(nn.Module):
                 else:
                     outputs["value"] = head_output
             else:
-                # For other heads, process directly
+                # For confidence head, process directly
                 if name == "confidence":
                     # For confidence head
                     if isinstance(head, (BayesianConfidenceHead)):
                         if use_sampling:
-                            head_output = head.sample(backbone_features)
+                            head_output = head.sample(backbone_features, temperature=temperature[name])
                         else:
                             head_output = head(backbone_features)
                     else:
@@ -293,11 +307,11 @@ class UnifiedNetwork(nn.Module):
                             raise ValueError(f"Unexpected dictionary output from confidence head: {head_output.keys()}")
                     else:
                         outputs["confidences"] = head_output
-                else:
+                else: # name == "discrete"
                     # For discrete head
                     if isinstance(head, (BayesianDiscreteHead)):
                         if use_sampling:
-                            head_output = head.sample(backbone_features)
+                            head_output = head.sample(backbone_features, temperature=temperature[name])
                         else:
                             head_output = head(backbone_features)
                     else:

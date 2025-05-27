@@ -12,7 +12,7 @@ class ParametricDiscreteHead(BaseHead):
         input_dim: int,
         hidden_dim: int,
         n_assets: int,
-        device: str = "cuda"
+        device: str = "cuda",
     ):
         """
         Initialize the parametric discrete head.
@@ -22,12 +22,14 @@ class ParametricDiscreteHead(BaseHead):
             hidden_dim: Hidden dimension for processing
             n_assets: Number of assets
             device: Device to run the head on
+
         """
         super().__init__(input_dim, hidden_dim, device)
         self.n_assets = n_assets
         
         # Action probability layers (3 actions: buy, sell, hold)
-        self.action_layer = nn.Linear(hidden_dim, n_assets * 3).to(device)
+        self.action_layer =nn.Linear(hidden_dim, n_assets * 3).to(device)
+
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -72,7 +74,8 @@ class BayesianDiscreteHead(BaseHead):
         input_dim: int,
         hidden_dim: int,
         n_assets: int,
-        device: str = "cuda"
+        device: str = "cuda",
+        sampling_strategy: str = "thompson"
     ):
         """
         Initialize the Bayesian discrete head.
@@ -85,6 +88,7 @@ class BayesianDiscreteHead(BaseHead):
         """
         super().__init__(input_dim, hidden_dim, device)
         self.n_assets = n_assets
+        self.sampling_strategy = sampling_strategy
         
         # Distribution parameter layers for each action
         self.alpha_layer = nn.Linear(hidden_dim, n_assets * 3).to(device)
@@ -117,8 +121,10 @@ class BayesianDiscreteHead(BaseHead):
         alphas = alphas.view(batch_size, self.n_assets, 3)
         betas = betas.view(batch_size, self.n_assets, 3)
         
+        mean = alphas / (alphas + betas)
+
         # Convert to probabilities using softmax
-        probs = torch.softmax(alphas, dim=-1)
+        probs = torch.softmax(mean, dim=-1)
         
         # Remove batch dimension if input was single sample
         if x.shape[0] == 1 and x.dim() == 2:
@@ -135,7 +141,7 @@ class BayesianDiscreteHead(BaseHead):
     def sample(
         self,
         x: torch.Tensor,
-        strategy: str = "thompson",
+        strategy: Optional[str] = None,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
         """
@@ -152,6 +158,9 @@ class BayesianDiscreteHead(BaseHead):
         dist_params = self.forward(x)
         alphas = dist_params["alphas"]
         betas = dist_params["betas"]
+        
+        if strategy is None:
+            strategy = self.sampling_strategy
         
         if strategy == "thompson":
             samples = BayesianSampler.beta_sample(alphas, betas, **kwargs)

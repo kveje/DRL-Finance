@@ -25,7 +25,10 @@ class PositionProcessor(BaseProcessor):
         
         # Use a one-layer network to capture relationships between assets
         self.processor = nn.Sequential(
-            nn.Linear(n_assets, hidden_dim),
+            nn.Linear(n_assets, hidden_dim*2),
+            nn.LayerNorm(hidden_dim*2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim*2, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
         ).to(device)
