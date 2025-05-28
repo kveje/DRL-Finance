@@ -284,8 +284,12 @@ class ExperimentManager:
                 
                 # Save metrics if needed
                 if (episode + 1) % self.save_metric_interval == 0:
-                    self.metrics_manager.save()
-                    self.metrics_manager.plot()
+                    try:
+                        self.metrics_manager.save()
+                        self.metrics_manager.plot()
+                    except Exception as e:
+                        self.logger.error(f"Error saving metrics: {str(e)}")
+
                 
                 # Check if we should stop early
                 if self.patience_counter >= self.early_stopping_patience:
