@@ -3,9 +3,9 @@
 from typing import Dict, Any, Type
 from .base_agent import BaseAgent
 from .dqn_agent import DQNAgent
-from .ddpg_agent import DDPGAgent
 from .ppo_agent import PPOAgent
 from .a2c_agent import A2CAgent
+from .sac_agent import SACAgent
 from ..action_interpreters.interpreter_factory import InterpreterFactory
 from .temperature_manager import TemperatureManager
 
@@ -14,9 +14,9 @@ class AgentFactory:
     
     _agents: Dict[str, Type[BaseAgent]] = {
         'dqn': DQNAgent,
-        'ddpg': DDPGAgent,
         'ppo': PPOAgent,
-        'a2c': A2CAgent
+        'a2c': A2CAgent,
+        'sac': SACAgent
     }
     
     @classmethod

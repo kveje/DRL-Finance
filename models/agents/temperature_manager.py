@@ -98,9 +98,9 @@ class TemperatureManager:
     def get_all_temperatures_printerfriendly(self) -> Dict[str, float]:
         """Get all temperatures in a single call with printerfriendly format."""
         return {
-            "Discrete Temperature": self.get_discrete_temperature(),
-            "Confidence Temperature": self.get_confidence_temperature(), 
-            "Value Temperature": self.get_value_temperature()
+            "discrete_temperature": self.get_discrete_temperature(),
+            "confidence_temperature": self.get_confidence_temperature(), 
+            "value_temperature": self.get_value_temperature()
         }
     
     def _should_update_temperature(self, global_step: int) -> bool:

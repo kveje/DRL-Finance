@@ -3,9 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from typing import Dict, List, Optional, Tuple, Union, Any
-from collections import deque
-import random
 import os
+from tensordict import TensorDict
 
 from utils.logger import Logger
 logger = Logger.get_logger()
@@ -36,6 +35,7 @@ class PPOAgent(BaseAgent):
         max_grad_norm: float = 0.5,
         ppo_epochs: int = 10,
         batch_size: int = 64,
+        use_bayesian: bool = False,
         **kwargs
     ):
         """
@@ -56,9 +56,11 @@ class PPOAgent(BaseAgent):
             max_grad_norm: Maximum gradient norm for clipping
             ppo_epochs: Number of PPO epochs for each update
             batch_size: Mini-batch size for PPO update
+            use_bayesian: Whether to use Bayesian inference
             **kwargs: Additional arguments
         """
         super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
+        self.use_bayesian = use_bayesian
         
         # Hyperparameters
         self.gamma = gamma
@@ -70,67 +72,66 @@ class PPOAgent(BaseAgent):
         self.ppo_epochs = ppo_epochs
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-
-        # Initialize optimizer
-        self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
         
         # Storage for rollout data
-        self.rollout_states = []
-        self.rollout_actions = []
-        self.rollout_log_probs = []
-        self.rollout_rewards = []
-        self.rollout_dones = []
-        self.rollout_values = []
+        self.memory_device = "cpu"
+        self.rollout: List[TensorDict] = []
+        self.max_rollout_size = update_frequency
         
         # Steps counter
         self.steps = 0
-    
+        
+        # Initialize optimizer
+        self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
+
+        # Last values
+        self.last_policy_loss = 0.0
+        self.last_value_loss = 0.0
+        self.last_entropy_loss = 0.0
+        self.last_total_loss = 0.0
+        self.last_mean_advantage = 0.0
+        self.last_mean_return = 0.0
+
     def get_intended_action(
         self,
-        observations: Dict[str, torch.Tensor],
-        current_position: np.ndarray,
-        deterministic: bool = False
+        observations: Dict[str, np.ndarray],
+        deterministic: bool = True,
+        sample: bool = True
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get the intended action using the policy network.
         
         Args:
             observations: Dictionary of observation tensors
-            current_position: Current position of the agent
             deterministic: Whether to select actions deterministically
-            
+            sample: Whether to sample from the distribution (for Bayesian)
+        
         Returns:
             Tuple of (scaled_action, action_choice) where:
             - scaled_action is the actual action to execute
             - action_choice is the unscaled action for learning
         """
+        # Convert observations to tensors
+        obs_tensors = {
+            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            for k, v in observations.items()
+        }
+        use_sampling = self.use_bayesian and sample
+        # Get network outputs
         with torch.no_grad():
-            outputs = self.network(observations)
-            
-            # Store value for training
-            self.last_value = outputs["value"]
-
-            # Convert outputs to numpy and remove batch dimension if present
-            cpu_outputs = {}
-            for key, value in outputs.items():
-                if key == "entropy":
-                    continue  # Skip entropy which is a scalar
-                if isinstance(value, torch.Tensor):
-                    cpu_outputs[key] = value.cpu().numpy()
-                else:
-                    cpu_outputs[key] = value
-            
-            # Take deterministic action
-            if deterministic:
-                scaled_action, action_choice = self.interpreter.interpret(cpu_outputs, current_position, deterministic=True)
-            else:
-                scaled_action, action_choice, log_probs = self.interpreter.interpret_with_log_prob(cpu_outputs, current_position)
-                
-                # Store log probabilities for training
-                self.last_log_probs = log_probs
-            
+            network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature=self.temperature_manager.get_all_temperatures())
+            # Move the network outputs to memory device
+            network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
+            # Sample from policy
+            scaled_action, action_choice, log_probs = self.interpreter.interpret_with_log_prob(network_outputs)
+        # Store value and log probs for training
+        self.last_log_probs = log_probs
+        self.last_value = network_outputs["value"]
+        # Convert to numpy
+        scaled_action = scaled_action.numpy()
+        action_choice = action_choice.numpy()
         return scaled_action, action_choice
-    
+
     def add_to_rollout(
         self,
         observation: Dict[str, np.ndarray],
@@ -156,110 +157,151 @@ class PPOAgent(BaseAgent):
             k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
             for k, v in observation.items()
         }
-        
+        next_obs_tensors = {
+            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            for k, v in next_observation.items()
+        }
         # Store transition data
-        self.rollout_states.append(obs_tensors)
-        self.rollout_actions.append(torch.as_tensor(action_choice, device=self.device))
-        self.rollout_log_probs.append(self.last_log_probs)
-        self.rollout_rewards.append(torch.tensor([reward], device=self.device))
-        self.rollout_dones.append(torch.tensor([done], device=self.device))
-        self.rollout_values.append(self.last_value)
-    
-    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+        transition = TensorDict({
+            "obs": obs_tensors,
+            "next_obs": next_obs_tensors,
+            "action_choices": torch.as_tensor(action_choice, dtype=torch.long),
+            "log_probs": self.last_log_probs,
+            "rewards": torch.tensor(reward, dtype=torch.float32),
+            "dones": torch.tensor(done, dtype=torch.float32),
+            "values": self.last_value
+        }, device=self.memory_device)
+        self.rollout.append(transition)
+
+    def _compute_gae(self, rewards: torch.Tensor, dones: torch.Tensor, values: torch.Tensor, next_value: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Update the agent's network using collected rollout data with PPO.
+        Compute Generalized Advantage Estimation (GAE) for the rollout.
         
         Args:
-            batch: Dictionary containing experience data (not used in PPO)
-            
+            rewards: Tensor of rewards
+            dones: Tensor of done flags
+            values: Tensor of current values
+            next_value: Value of the next state for bootstrapping
+        
+        Returns:
+            Tuple of (advantages, returns)
+        """
+        T = len(rewards)
+        # Bootstrap value if provided
+        if next_value is None:
+            next_value = torch.zeros(size=(1,), device=self.device)
+        if next_value.dim() == 2:
+            next_value = next_value.squeeze(-1)
+
+        # Append next value for bootstrapping
+        values_with_next = torch.cat([values, next_value])
+        # Compute TD errors
+        deltas = rewards + self.gamma * values_with_next[1:] * (1 - dones) - values_with_next[:-1]
+        # Compute GAE
+        advantages = torch.zeros_like(deltas)
+        gae = 0
+        for t in reversed(range(T)):
+            gae = deltas[t] + self.gamma * self.gae_lambda * gae * (1 - dones[t])
+            advantages[t] = gae
+        returns = advantages + values
+        return advantages, returns
+
+    def update(self, external_rollout: Optional[List[TensorDict]] = None) -> Dict[str, float]:
+        """
+        Update the agent's network using collected rollout data with PPO objective.
+        
+        Args:
+            external_rollout: Optional external rollout data (otherwise uses internal buffer)
+        
         Returns:
             Dictionary of training metrics
         """
-        # Check if we have data to train on
-        if len(self.rollout_states) == 0:
-            return {"policy_loss": 0, "value_loss": 0, "entropy_loss": 0, "total_loss": 0}
+        if external_rollout is not None:
+            rollout = external_rollout
+        else:
+            # Use internal rollout buffer
+            if len(self.rollout) == 0:
+                return {"policy_loss": 0, "value_loss": 0, "entropy_loss": 0, "total_loss": 0}
+            rollout = self.rollout
         
-        # Convert lists to tensors
-        states = {k: torch.stack([s[k] for s in self.rollout_states]) for k in self.rollout_states[0].keys()}
-        actions = torch.stack(self.rollout_actions)
-        old_log_probs = torch.stack(self.rollout_log_probs)
-        rewards = torch.stack(self.rollout_rewards)
-        dones = torch.stack(self.rollout_dones).float()  # Convert bool to float
-        values = torch.stack(self.rollout_values)
+        # Stack list of TensorDicts into a single TensorDict
+        rollout = TensorDict.stack(rollout, dim=0).to(self.device)
+       
+        # Get data from rollout
+        obs = rollout["obs"]
+        next_obs = rollout["next_obs"]
+        action_choices = rollout["action_choices"]
+        old_log_probs = rollout["log_probs"]
+        rewards = rollout["rewards"]
+        dones = rollout["dones"]
+        values = rollout["values"]
         
-        # Calculate returns and advantages using GAE
-        returns = []
-        advantages = []
-        next_value = 0
-        next_advantage = 0
+        # Compute bootstrap value for final state if episode is not done
+        next_value = None
+        if len(dones) > 0 and not dones[-1]:
+            final_obs = {k: v[-1] for k, v in obs.items()}
+            with torch.no_grad():
+                final_outputs = self.network(final_obs, use_sampling=self.use_bayesian, temperature=self.temperature_manager.get_all_temperatures())
+                next_value = final_outputs["value"]
         
-        for r, d, v in zip(reversed(rewards), reversed(dones), reversed(values)):
-            delta = r + self.gamma * next_value * (1 - d) - v
-            next_advantage = delta + self.gamma * self.gae_lambda * next_advantage * (1 - d)
-            next_value = v
-            
-            returns.insert(0, next_advantage + v)
-            advantages.insert(0, next_advantage)
+        # Handle dimensions of values and next_value
+        if values.dim() == 2:
+            values = values.squeeze(-1)
+        if next_value is not None and next_value.dim() == 2:
+            next_value = next_value.squeeze(-1)
+            next_value = next_value.to(self.device)
+        if rewards.dim() == 2:
+            rewards = rewards.squeeze(-1)
+        if dones.dim() == 2:
+            dones = dones.squeeze(-1)
         
-        returns = torch.cat(returns).detach()
-        advantages = torch.cat(advantages).detach()
+        # Calculate returns and advantages
+        advantages, returns = self._compute_gae(rewards, dones, values, next_value)
         
         # Normalize advantages
         if len(advantages) > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
-        
-        # PPO update
-        metrics = {
-            "policy_loss": 0,
-            "value_loss": 0,
-            "entropy_loss": 0,
-            "total_loss": 0,
-            "clip_fraction": 0
-        }
-        
-        # Prepare dataset
-        dataset_size = len(states[list(states.keys())[0]])
-        indices = np.arange(dataset_size)
-        
-        # PPO epochs
+
+        # PPO update: multiple epochs, mini-batch
+        batch_size = self.batch_size
+        total_steps = len(advantages)
+        idxs = np.arange(total_steps)
+        policy_loss_epoch = 0
+        value_loss_epoch = 0
+        entropy_loss_epoch = 0
+        total_loss_epoch = 0
+
         for _ in range(self.ppo_epochs):
-            # Shuffle indices
-            np.random.shuffle(indices)
-            
-            # Mini-batch updates
-            for start_idx in range(0, dataset_size, self.batch_size):
-                end_idx = min(start_idx + self.batch_size, dataset_size)
-                batch_indices = indices[start_idx:end_idx]
+            np.random.shuffle(idxs)
+            for start in range(0, total_steps, batch_size):
+                end = start + batch_size
+                mb_idx = idxs[start:end]
+                mb_obs = {k: v[mb_idx] for k, v in obs.items()}
+                mb_action_choices = action_choices[mb_idx]
+                mb_old_log_probs = old_log_probs[mb_idx]
+                mb_advantages = advantages[mb_idx]
+                mb_returns = returns[mb_idx]
+                mb_values = values[mb_idx]
+
+                # Get new outputs for current policy
+                network_outputs = self.network(mb_obs, use_sampling=self.use_bayesian, temperature=self.temperature_manager.get_all_temperatures())
                 
-                # Get batch data
-                batch_states = {k: v[batch_indices] for k, v in states.items()}
-                batch_actions = actions[batch_indices]
-                batch_old_log_probs = old_log_probs[batch_indices]
-                batch_returns = returns[batch_indices]
-                batch_advantages = advantages[batch_indices]
+                # Get new logprobs and values
+                new_log_probs = self.interpreter.evaluate_actions_log_probs(network_outputs, mb_action_choices)
+                new_values = network_outputs["value"]
                 
-                # Get current outputs
-                outputs = self.network(batch_states)
-                batch_values = outputs["value"]
-                
-                # Get current log probabilities
-                batch_new_log_probs = self.interpreter.evaluate_actions_log_probs(
-                    outputs, batch_actions
-                )
-                
-                # Compute ratio (policy / old policy)
-                ratio = torch.exp(batch_new_log_probs - batch_old_log_probs)
-                
-                # Clipped surrogate objective
-                surr1 = ratio * batch_advantages
-                surr2 = torch.clamp(ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio) * batch_advantages
+                # PPO clipped surrogate objective
+                ratio = (new_log_probs.sum(dim=-1) - mb_old_log_probs.sum(dim=-1)).exp()
+                surr1 = ratio * mb_advantages
+                surr2 = torch.clamp(ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio) * mb_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
                 
                 # Value loss
-                value_loss = self.value_coef * ((batch_returns - batch_values) ** 2).mean()
+                value_loss = self.value_coef * ((mb_returns - new_values) ** 2).mean()
                 
-                # Entropy loss
-                entropy_loss = -self.entropy_coef * outputs.get("entropy", torch.zeros(1).to(self.device)).mean()
+                # Entropy loss (encourage exploration)
+                entropy = torch.mean(-new_log_probs.sum(dim=-1))
+                entropy_loss = -self.entropy_coef * entropy.mean()
                 
                 # Total loss
                 total_loss = policy_loss + value_loss + entropy_loss
@@ -270,32 +312,45 @@ class PPOAgent(BaseAgent):
                 
                 # Clip gradients
                 nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
-                
                 self.optimizer.step()
                 
-                # Track metrics
-                metrics["policy_loss"] += policy_loss.item()
-                metrics["value_loss"] += value_loss.item()
-                metrics["entropy_loss"] += entropy_loss.item()
-                metrics["total_loss"] += total_loss.item()
-                metrics["clip_fraction"] += ((ratio - 1.0).abs() > self.clip_ratio).float().mean().item()
+                # Accumulate losses for reporting
+                policy_loss_epoch += policy_loss.item()
+                value_loss_epoch += value_loss.item()
+                entropy_loss_epoch += entropy_loss.item()
+                total_loss_epoch += total_loss.item()
+
+        n_updates = self.ppo_epochs * (total_steps // batch_size + int(total_steps % batch_size != 0))
         
-        # Average metrics
-        num_updates = self.ppo_epochs * ((dataset_size + self.batch_size - 1) // self.batch_size)
-        for key in metrics:
-            metrics[key] /= num_updates
-        
+        # Store loss values for visualization
+        self.last_policy_loss = policy_loss_epoch / n_updates
+        self.last_value_loss = value_loss_epoch / n_updates
+        self.last_entropy_loss = entropy_loss_epoch / n_updates
+        self.last_total_loss = total_loss_epoch / n_updates
+        self.last_mean_advantage = advantages.mean().item()
+        self.last_mean_return = returns.mean().item() 
+
+        # Detach all values
+
         # Clear rollout buffers
-        self.rollout_states = []
-        self.rollout_actions = []
-        self.rollout_log_probs = []
-        self.rollout_rewards = []
-        self.rollout_dones = []
-        self.rollout_values = []
+        if external_rollout is None:
+            self.rollout = []
         
         # Increment steps
         self.steps += 1
-        
+
+        metrics = { 
+            "policy_loss": self.last_policy_loss,
+            "value_loss": self.last_value_loss,
+            "entropy_loss": self.last_entropy_loss,
+            "total_loss": self.last_total_loss,
+            "mean_advantage": self.last_mean_advantage,
+            "mean_return": self.last_mean_return
+        }
+
+        if self.use_bayesian:
+            metrics.update(self.temperature_manager.get_all_temperatures_printerfriendly())
+
         return metrics
 
     def save(self, path: str) -> None:
@@ -306,8 +361,6 @@ class PPOAgent(BaseAgent):
             path: Base path to save the models
         """
         os.makedirs(path, exist_ok=True)
-        
-        # Save network state
         torch.save({
             'network_state_dict': self.network.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
@@ -336,22 +389,29 @@ class PPOAgent(BaseAgent):
             - value_loss: Last value loss
             - entropy_loss: Last entropy loss
             - total_loss: Last total loss
-            - clip_fraction: Last clip fraction
         """
-        return {
+        info = {
             "policy_loss": getattr(self, 'last_policy_loss', 0),
             "value_loss": getattr(self, 'last_value_loss', 0),
             "entropy_loss": getattr(self, 'last_entropy_loss', 0),
-            "total_loss": getattr(self, 'last_total_loss', 0),
-            "clip_fraction": getattr(self, 'last_clip_fraction', 0)
+            "total_loss": getattr(self, 'last_total_loss', 0)
         }
 
+        if self.use_bayesian:
+            info.update(self.temperature_manager.get_all_temperatures_printerfriendly())
+
+        return info
+
     def get_config(self) -> Dict[str, Any]:
-        """Get the configuration of the agent."""
+        """
+        Get the configuration of the agent.
+        
+        Returns:
+            Dictionary containing agent configuration
+        """
         return {
             "learning_rate": self.learning_rate,
             "gamma": self.gamma,
-            "gae_lambda": self.gae_lambda,
             "clip_ratio": self.clip_ratio,
             "entropy_coef": self.entropy_coef,
             "value_coef": self.value_coef,
@@ -359,7 +419,8 @@ class PPOAgent(BaseAgent):
             "ppo_epochs": self.ppo_epochs,
             "batch_size": self.batch_size,
             "device": str(self.device),
-            "network_config": self.network_config
+            "network_config": self.network_config,
+            "gae_lambda": self.gae_lambda
         }
 
     def _get_agent_specific_state(self) -> Dict[str, Any]:
@@ -370,21 +431,16 @@ class PPOAgent(BaseAgent):
             Dictionary containing PPO-specific state
         """
         return {
-            'last_value': self.last_value.detach().cpu() if hasattr(self, 'last_value') else None,
-            'last_log_probs': self.last_log_probs.detach().cpu() if hasattr(self, 'last_log_probs') else None,
-            'last_entropy': self.last_entropy.detach().cpu() if hasattr(self, 'last_entropy') else None,
-            'last_policy_loss': getattr(self, 'last_policy_loss', 0.0),
-            'last_value_loss': getattr(self, 'last_value_loss', 0.0),
-            'last_entropy_loss': getattr(self, 'last_entropy_loss', 0.0),
-            'last_total_loss': getattr(self, 'last_total_loss', 0.0),
-            'clip_ratio': self.clip_ratio,
-            'value_coef': self.value_coef,
-            'entropy_coef': self.entropy_coef,
-            'gae_lambda': self.gae_lambda,
-            'normalize_advantages': self.normalize_advantages,
-            'clip_grad_norm': self.clip_grad_norm
+            'last_value': self.last_value,
+            'last_log_probs': self.last_log_probs,
+            'last_policy_loss': self.last_policy_loss,
+            'last_value_loss': self.last_value_loss,
+            'last_entropy_loss': self.last_entropy_loss,
+            'last_total_loss': self.last_total_loss,
+            'last_mean_advantage': self.last_mean_advantage,
+            'last_mean_return': self.last_mean_return
         }
-    
+
     def _load_agent_specific_state(self, state_dict: Dict[str, Any]) -> None:
         """
         Load PPO-specific state from checkpoint.
@@ -396,18 +452,11 @@ class PPOAgent(BaseAgent):
             self.last_value = state_dict['last_value'].to(self.device)
         if 'last_log_probs' in state_dict and state_dict['last_log_probs'] is not None:
             self.last_log_probs = state_dict['last_log_probs'].to(self.device)
-        if 'last_entropy' in state_dict and state_dict['last_entropy'] is not None:
-            self.last_entropy = state_dict['last_entropy'].to(self.device)
-            
         self.last_policy_loss = state_dict.get('last_policy_loss', 0.0)
         self.last_value_loss = state_dict.get('last_value_loss', 0.0)
         self.last_entropy_loss = state_dict.get('last_entropy_loss', 0.0)
         self.last_total_loss = state_dict.get('last_total_loss', 0.0)
-        
-        # Load hyperparameters
-        self.clip_ratio = state_dict.get('clip_ratio', self.clip_ratio)
-        self.value_coef = state_dict.get('value_coef', self.value_coef)
-        self.entropy_coef = state_dict.get('entropy_coef', self.entropy_coef)
-        self.gae_lambda = state_dict.get('gae_lambda', self.gae_lambda)
-        self.normalize_advantages = state_dict.get('normalize_advantages', self.normalize_advantages)
-        self.clip_grad_norm = state_dict.get('clip_grad_norm', self.clip_grad_norm) 
+
+    def get_model_name(self) -> str:
+        """Get the name of the model."""
+        return "ppo"

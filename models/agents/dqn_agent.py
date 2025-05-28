@@ -36,7 +36,7 @@ class DQNAgent(BaseAgent):
         epsilon_end: float = 0.01,
         epsilon_decay: float = 0.999,
         target_update: int = 10,
-        learning_rate: float = 0.001,
+        learning_rate: float = 0.0003,
         use_bayesian: bool = False,
         **kwargs
     ):
@@ -61,6 +61,7 @@ class DQNAgent(BaseAgent):
             **kwargs: Additional arguments
         """
         super().__init__(network_config, interpreter, temperature_manager, update_frequency, device)
+        self.use_bayesian = use_bayesian
         
         # DQN specific parameters
         self.memory_size = memory_size
@@ -72,7 +73,6 @@ class DQNAgent(BaseAgent):
         self.epsilon_decay = epsilon_decay
         self.target_update = target_update
         self.learning_rate = learning_rate
-        self.use_bayesian = use_bayesian
         
         # Initialize replay memory
         self.memory_device = "cpu"
@@ -123,8 +123,8 @@ class DQNAgent(BaseAgent):
             # Use sampling if not deterministic and Bayesian is enabled
             network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature = self.temperature_manager.get_all_temperatures())
         
-        # Move the network outputs to cpu
-        network_outputs = {k: v.cpu() for k, v in network_outputs.items()}
+        # Move the network outputs to memory device
+        network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
 
         # Epsilon-greedy action selection
         if not deterministic and random.random() < self.epsilon:
@@ -145,7 +145,7 @@ class DQNAgent(BaseAgent):
         
         return scaled_action, action_choice
     
-    def update(self) -> Dict[str, float]:
+    def update(self, batch: Optional[TensorDict] = None) -> Dict[str, float]:
         """
         Update the network using a batch of experience.
         
@@ -162,7 +162,8 @@ class DQNAgent(BaseAgent):
         """
 
         # Get batch from memory
-        batch = self.get_batch()
+        if batch is None:
+            batch = self.get_batch()
 
         # Extract batch data
         obs = batch['observations'] # Dict {"process_str": tensor[batch_size, ...], ...}
@@ -199,6 +200,7 @@ class DQNAgent(BaseAgent):
         # Optimize the network
         self.optimizer.zero_grad()
         loss.backward()
+        total_norm = torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
         self.optimizer.step()
         
         # Update target network
@@ -210,11 +212,13 @@ class DQNAgent(BaseAgent):
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
         
         # Store loss for visualization
-        self.last_loss = loss.item()
+        self.last_loss = loss.detach().cpu().item()
+        self.last_grad_norm = total_norm.detach().cpu().item() if hasattr(total_norm, 'item') else float(total_norm)
 
         metrics = {
-            "loss": loss.item(),
+            "loss": self.last_loss,
             "epsilon": self.epsilon,
+            "grad_norm": self.last_grad_norm,
         }
 
         if self.use_bayesian:
@@ -273,7 +277,7 @@ class DQNAgent(BaseAgent):
     
     def get_model_name(self) -> str:
         """Get the name of the model."""
-        return "DQN"
+        return "dqn"
     
     def get_model(self) -> nn.Module:
         """Get the policy network."""
@@ -337,7 +341,7 @@ class DQNAgent(BaseAgent):
 
         transition = TensorDict({
             'observations': obs_tensors,
-            'actions': torch.as_tensor(action_choice,  dtype=torch.long),
+            'actions': torch.as_tensor(action_choice, dtype=torch.long),
             'rewards': torch.as_tensor(reward, dtype=torch.float32),
             'next_observations': next_obs_tensors,
             'dones': torch.as_tensor(done, dtype=torch.float32)
@@ -374,13 +378,12 @@ class DQNAgent(BaseAgent):
         """
         info = {
             'epsilon': self.epsilon,
-            'loss': getattr(self, 'last_loss', None)
+            'loss': getattr(self, 'last_loss', None),
+            'grad_norm': getattr(self, 'last_grad_norm', None)
         }
         
         if self.use_bayesian:
-            temperatures = self.temperature_manager.get_all_temperatures_printerfriendly()
-            for key, value in temperatures.items():
-                info[key] = value
+            info.update(self.temperature_manager.get_all_temperatures_printerfriendly())
         
         return info
 
@@ -393,7 +396,7 @@ class DQNAgent(BaseAgent):
         """
         state = {}
         state['epsilon'] = self.epsilon
-        state['target_network'] = self.target_network.state_dict()
+        state['target_network_state_dict'] = self.target_network.state_dict()
         if self.use_bayesian:
             steps_info = self.temperature_manager.get_step_info()
             for key, value in steps_info.items():
@@ -410,6 +413,8 @@ class DQNAgent(BaseAgent):
         self.epsilon = state_dict.get('epsilon', self.epsilon)
         if 'target_network_state_dict' in state_dict:
             self.target_network.load_state_dict(state_dict['target_network_state_dict'])
+        if 'target_network_optimizer_state_dict' in state_dict:
+            self.target_network_optimizer.load_state_dict(state_dict['target_network_optimizer_state_dict'])
 
         if self.use_bayesian:
             steps_info = self.temperature_manager.get_step_info()
