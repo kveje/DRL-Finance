@@ -120,6 +120,7 @@ class BayesianValueHead(BaseHead):
         if x.shape[0] == 1 and x.dim() == 2:
             means = means.squeeze(0)
             stds = stds.squeeze(0)
+            
         
         return {
             "value": means,  # (batch_size, 1) or (1,)
