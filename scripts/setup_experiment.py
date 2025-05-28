@@ -44,7 +44,7 @@ from config.models import (
     A2C_PARAMS,
     PPO_PARAMS,
     DQN_PARAMS,
-    DDPG_PARAMS,
+    SAC_PARAMS,
 )
 from config.env import ENV_PARAMS, MARKET_FRIC_PARAMS, CONSTRAINT_PARAMS, REWARD_PARAMS, get_processor_config
 from config.tickers import DOW_30_TICKER, NASDAQ_100_TICKER, SP_500_TICKER
@@ -65,7 +65,7 @@ def parse_args():
                         help="Whether to include market turbulence data in the experiment")
     parser.add_argument("--output-dir", type=str, default="experiments")
     parser.add_argument("--agent-type", type=str, 
-                        choices=["dqn", "ddpg", "ppo", "a2c"], 
+                        choices=["dqn", "ppo", "a2c", "sac"], 
                         default="dqn", 
                         help="Type of agent to use for the experiment")
     parser.add_argument("--interpreter-type", type=str,
@@ -314,7 +314,7 @@ def main():
         head_type="bayesian" if args.use_bayesian else "parametric",
         include_discrete=True,
         include_confidence=True if args.interpreter_type == "confidence_scaled" else False,
-        include_value=True if args.agent_type in ["ppo", "a2c"] else False,
+        include_value=True if args.agent_type in ["ppo", "a2c", "sac"] else False,
         technical_dim = len(columns["tech_cols"]) if args.indicator_type != "no" else None
     )
 
@@ -324,7 +324,7 @@ def main():
     logger.info(f"Using {'Bayesian' if args.use_bayesian else 'Parametric'} network heads")
     if args.interpreter_type == "confidence_scaled":
         logger.info("Network includes both discrete and confidence heads")
-    elif args.agent_type in ["ppo", "a2c"]:
+    elif args.agent_type in ["ppo", "a2c", "sac"]:
         logger.info("Network includes value heads for policy evaluation")
     
     # Initialize device
@@ -341,12 +341,12 @@ def main():
     # Add agent-specific parameters based on the agent type
     if args.agent_type == "dqn":
         agent_config.update(DQN_PARAMS)
-    elif args.agent_type == "ddpg":
-        agent_config.update(DDPG_PARAMS)
     elif args.agent_type == "ppo":
         agent_config.update(PPO_PARAMS)
     elif args.agent_type == "a2c":
         agent_config.update(A2C_PARAMS)
+    elif args.agent_type == "sac":
+        agent_config.update(SAC_PARAMS)
     
     # Add temperature configuration
     temperature_config = get_temperature_config(network_config, update_frequency=agent_config["update_frequency"])
@@ -381,6 +381,7 @@ def main():
         max_train_time=86400,  # 24 hours
         eval_interval=10,
         save_interval=50,
+        save_metric_interval=10,
         early_stopping_patience=50,
         early_stopping_threshold=0.01,
         early_stopping_metric="sharpe_ratio",  # Default to sharpe ratio for early stopping
