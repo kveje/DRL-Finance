@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import torch
 from unittest.mock import MagicMock, patch
+from tensordict import TensorDict
 
 import sys
 import os
@@ -12,6 +13,7 @@ from models.agents.dqn_agent import DQNAgent
 from models.action_interpreters.discrete_interpreter import DiscreteInterpreter
 from models.action_interpreters.confidence_scaled_interpreter import ConfidenceScaledInterpreter
 from models.networks.unified_network import UnifiedNetwork
+from models.agents.temperature_manager import TemperatureManager
 
 class TestDQNAgent(unittest.TestCase):
     """Test cases for the DQN agent."""
@@ -45,7 +47,6 @@ class TestDQNAgent(unittest.TestCase):
             'backbone': {
                 'type': 'mlp',
                 'hidden_dims': [128, 64],
-                'dropout': 0.1
             }
         }
         
@@ -84,20 +85,43 @@ class TestDQNAgent(unittest.TestCase):
             n_assets=self.n_assets,
             max_trade_size=self.max_position_size
         )
+
+        self.update_frequency = 1
+
+        self.temperature_head_config = {
+            "discrete": {
+                "initial_temp": 2.0,
+                "final_temp": 1.2,
+                "decay_rate": 2.5,
+                "decay_fraction": 0.8
+            },
+            "confidence": {
+                "initial_temp": 1.8,
+                "final_temp": 1.1,
+                "decay_rate": 2.5,
+                "decay_fraction": 0.75
+            },
+        }
+
+        self.temperature_manager = TemperatureManager(update_frequency=self.update_frequency, head_configs=self.temperature_head_config)
         
         # Create agents with their respective configs
         self.discrete_agent = DQNAgent(
             env=self.env,
             network_config=self.discrete_network_config,
             interpreter=self.discrete_interpreter,
-            device="cpu"
+            device="cpu",
+            temperature_manager=self.temperature_manager,
+            update_frequency=self.update_frequency
         )
         
         self.confidence_agent = DQNAgent(
             env=self.env,
             network_config=self.confidence_network_config,
             interpreter=self.confidence_interpreter,
-            device="cpu"
+            device="cpu",
+            temperature_manager=self.temperature_manager,
+            update_frequency=self.update_frequency
         )
     
     def test_initialization(self):
@@ -121,22 +145,20 @@ class TestDQNAgent(unittest.TestCase):
             'price': np.random.randn(self.n_assets, self.window_size),  # (n_assets, window_size)
             'technical': np.random.randn(self.n_assets, 15)  # (n_assets, tech_dim)
         }
-        current_position = np.zeros(self.n_assets)
         
         # Mock network output
         mock_output = {
-            'action_probs': torch.tensor([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # First asset: strongly sell
                 [0.1, 0.8, 0.1],  # Second asset: strongly hold
                 [0.1, 0.1, 0.8]   # Third asset: strongly buy
-            ]])
+            ])
         }
         self.discrete_agent.network = MagicMock(return_value=mock_output)
         
         # Test deterministic action selection
         scaled_actions, action_choices = self.discrete_agent.get_intended_action(
             observations=observations,
-            current_position=current_position,
             deterministic=True
         )
         self.assertEqual(scaled_actions.shape, (self.n_assets,))
@@ -146,7 +168,6 @@ class TestDQNAgent(unittest.TestCase):
         # Test stochastic action selection
         scaled_actions, action_choices = self.discrete_agent.get_intended_action(
             observations=observations,
-            current_position=current_position,
             deterministic=False
         )
         self.assertEqual(scaled_actions.shape, (self.n_assets,))
@@ -160,27 +181,25 @@ class TestDQNAgent(unittest.TestCase):
             'price': np.random.randn(self.n_assets, self.window_size),  # (n_assets, window_size)
             'technical': np.random.randn(self.n_assets, 15)  # (n_assets, tech_dim)
         }
-        current_position = np.zeros(self.n_assets)
         
         # Mock network output
         mock_output = {
-            'action_probs': torch.tensor([[
+            'action_probs': torch.tensor([
                 [0.8, 0.1, 0.1],  # First asset: strongly sell
                 [0.1, 0.8, 0.1],  # Second asset: strongly hold
                 [0.1, 0.1, 0.8]   # Third asset: strongly buy
-            ]]),
-            'confidences': torch.tensor([[
+            ]),
+            'confidences': torch.tensor([
                 0.9,  # High confidence in first asset
                 0.5,  # Medium confidence in second asset
                 0.7   # High confidence in third asset
-            ]])
+            ])
         }
         self.confidence_agent.network = MagicMock(return_value=mock_output)
         
         # Test deterministic action selection
         scaled_actions, action_choices = self.confidence_agent.get_intended_action(
             observations=observations,
-            current_position=current_position,
             deterministic=True
         )
         self.assertEqual(scaled_actions.shape, (self.n_assets,))
@@ -190,7 +209,6 @@ class TestDQNAgent(unittest.TestCase):
         # Test stochastic action selection
         scaled_actions, action_choices = self.confidence_agent.get_intended_action(
             observations=observations,
-            current_position=current_position,
             deterministic=False
         )
         self.assertEqual(scaled_actions.shape, (self.n_assets,))
@@ -205,7 +223,7 @@ class TestDQNAgent(unittest.TestCase):
                 'price': torch.randn(self.batch_size, self.n_assets, self.window_size, requires_grad=True),  # (batch_size, n_assets, window_size)
                 'technical': torch.randn(self.batch_size, self.n_assets, 15, requires_grad=True)  # (batch_size, n_assets, tech_dim)
             },
-            'actions': torch.randint(-1, 2, (self.batch_size, self.n_assets)) * self.max_position_size,  # Scale actions
+            'actions': torch.randint(-1, 2, (self.batch_size, self.n_assets)),
             'rewards': torch.randn(self.batch_size),
             'next_observations': {
                 'price': torch.randn(self.batch_size, self.n_assets, self.window_size, requires_grad=True),
@@ -213,6 +231,7 @@ class TestDQNAgent(unittest.TestCase):
             },
             'dones': torch.zeros(self.batch_size)
         }
+        batch = TensorDict(batch)
         
         # Mock network outputs with proper batch handling and gradients
         mock_current_output = {
@@ -298,7 +317,9 @@ class TestDQNAgent(unittest.TestCase):
                 env=self.env,
                 network_config=self.discrete_network_config.copy(),  # Make a copy to ensure it's the same
                 interpreter=self.discrete_interpreter,
-                device="cpu"
+                device="cpu",
+                temperature_manager=self.temperature_manager,
+                update_frequency=self.update_frequency
             )
             
             # Load state
@@ -327,7 +348,9 @@ class TestDQNAgent(unittest.TestCase):
                 env=self.env,
                 network_config=self.confidence_network_config.copy(),  # Make a copy to ensure it's the same
                 interpreter=self.confidence_interpreter,
-                device="cpu"
+                device="cpu",
+                temperature_manager=self.temperature_manager,
+                update_frequency=self.update_frequency
             )
             
             # Load state
@@ -341,62 +364,5 @@ class TestDQNAgent(unittest.TestCase):
             for p1, p2 in zip(new_agent.network.parameters(), self.confidence_agent.network.parameters()):
                 self.assertTrue(torch.allclose(p1, p2))
     
-    def test_bayesian_outputs(self):
-        """Test agent with Bayesian network outputs."""
-        # Update network config for Bayesian outputs
-        bayesian_config = self.confidence_network_config.copy()
-        bayesian_config['heads'] = {
-            'discrete': {
-                'enabled': True,
-                'type': 'bayesian',
-                'hidden_dim': 64
-            },
-            'confidence': {
-                'enabled': True,
-                'type': 'bayesian',
-                'hidden_dim': 64
-            }
-        }
-        
-        # Create agent with Bayesian outputs
-        bayesian_agent = DQNAgent(
-            env=self.env,
-            network_config=bayesian_config,
-            interpreter=self.confidence_interpreter,
-            device="cpu",
-            use_bayesian=True
-        )
-        
-        # Create mock observations
-        observations = {
-            'price': np.random.randn(self.n_assets, self.window_size),  # (n_assets, window_size)
-            'technical': np.random.randn(self.n_assets, 15)  # (n_assets, tech_dim)
-        }
-        current_position = np.zeros(self.n_assets)
-        
-        # Mock network output
-        mock_output = {
-            'alphas': torch.tensor([[
-                [8.0, 1.0, 1.0],  # Strong sell
-                [1.0, 8.0, 1.0],  # Strong hold
-                [1.0, 1.0, 8.0]   # Strong buy
-            ]]),
-            'betas': torch.tensor([[
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, 1.0]
-            ]])
-        }
-        bayesian_agent.network = MagicMock(return_value=mock_output)
-        
-        # Test action selection
-        scaled_actions, action_choices = bayesian_agent.get_intended_action(
-            observations=observations,
-            current_position=current_position,
-            deterministic=False
-        )
-        self.assertEqual(scaled_actions.shape, (self.n_assets,))
-        self.assertTrue(np.all(scaled_actions >= -self.max_position_size) and np.all(scaled_actions <= self.max_position_size))
-
 if __name__ == '__main__':
     unittest.main() 

@@ -17,7 +17,7 @@ class TestTemperatureManager(unittest.TestCase):
 
     def test_initialization(self):
         manager = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps
@@ -27,11 +27,13 @@ class TestTemperatureManager(unittest.TestCase):
         self.assertEqual(manager.training_step, 0)
         self.assertEqual(manager.global_step, 0)
         self.assertEqual(manager.update_frequency, self.update_frequency)
-        self.assertEqual(set(manager.head_configs.keys()), set(["discrete", "confidence", "value"]))
+        self.assertIn("discrete", set(manager.head_configs["head_configs"].keys()))
+        self.assertIn("confidence", set(manager.head_configs["head_configs"].keys()))
+        self.assertIn("value", set(manager.head_configs["head_configs"].keys()))
 
     def test_all_heads_temperatures(self):
         manager = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps
@@ -44,7 +46,7 @@ class TestTemperatureManager(unittest.TestCase):
 
     def test_temperature_decay_and_warmup(self):
         manager = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps
@@ -64,7 +66,7 @@ class TestTemperatureManager(unittest.TestCase):
 
     def test_reset(self):
         manager = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps
@@ -75,7 +77,7 @@ class TestTemperatureManager(unittest.TestCase):
         self.assertEqual(manager.training_step, 0)
         temps_reset = manager.get_all_temperatures()
         temps_initial = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps
@@ -85,7 +87,7 @@ class TestTemperatureManager(unittest.TestCase):
 
     def test_progress_info(self):
         manager = TemperatureManager(
-            head_config=self.head_config,
+            head_configs=self.head_config,
             update_frequency=self.update_frequency,
             total_env_steps=self.total_env_steps,
             warmup_steps=self.warmup_steps

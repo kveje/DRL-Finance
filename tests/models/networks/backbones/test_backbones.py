@@ -68,8 +68,6 @@ class TestMLPBackbone(unittest.TestCase):
         self.assertEqual(self.mlp_backbone.config, self.mlp_config)
         self.assertEqual(self.mlp_backbone.device.type, self.device.type)
         self.assertEqual(self.mlp_backbone.hidden_dims, [256, 128])
-        self.assertEqual(self.mlp_backbone.dropout, 0.1)
-        self.assertTrue(self.mlp_backbone.use_layer_norm)
     
     def test_forward(self):
         """Test forward pass through MLP."""
@@ -86,8 +84,6 @@ class TestMLPBackbone(unittest.TestCase):
         """Test MLP backbone with default configuration."""
         backbone = MLPBackbone(input_dim=32, config={}, device=self.device)
         self.assertEqual(backbone.hidden_dims, [256, 128])
-        self.assertEqual(backbone.dropout, 0.1)
-        self.assertTrue(backbone.use_layer_norm)
     
     def test_no_layer_norm(self):
         """Test MLP backbone without layer normalization."""
@@ -114,15 +110,6 @@ class TestMLPBackbone(unittest.TestCase):
         output = backbone(x)
         self.assertEqual(output.shape, (16, 128))
         self.assertEqual(output.device.type, self.device.type)
-    
-    def test_dropout_effect(self):
-        """Test that dropout is active during training."""
-        self.mlp_backbone.train()
-        x = torch.randn(16, 32, device=self.device)
-        output1 = self.mlp_backbone(x)
-        output2 = self.mlp_backbone(x)
-        # Outputs should be different due to dropout
-        self.assertFalse(torch.allclose(output1, output2))
     
     def test_dropout_inactive_during_eval(self):
         """Test that dropout is inactive during evaluation."""

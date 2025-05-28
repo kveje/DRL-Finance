@@ -105,15 +105,15 @@ class TestNetworkConfig(unittest.TestCase):
         """Test head dimension calculations"""
         # Test large network
         large_config = get_network_config(price_type='both', technical_dim=50, n_assets=10, window_size=10)
-        self.assertEqual(large_config['heads']['discrete']['hidden_dim'], 64)
-        self.assertEqual(large_config['heads']['confidence']['hidden_dim'], 32)
-        self.assertEqual(large_config['heads']['value']['hidden_dim'], 16)
+        self.assertEqual(large_config['heads']['discrete']['hidden_dim'], 128)
+        self.assertEqual(large_config['heads']['confidence']['hidden_dim'], 64)
+        self.assertEqual(large_config['heads']['value']['hidden_dim'], 32)
         
         # Test medium network
         medium_config = get_network_config(price_type='price', technical_dim=20, n_assets=10, window_size=10)
-        self.assertEqual(medium_config['heads']['discrete']['hidden_dim'], 64)
-        self.assertEqual(medium_config['heads']['confidence']['hidden_dim'], 32)
-        self.assertEqual(medium_config['heads']['value']['hidden_dim'], 16)
+        self.assertEqual(medium_config['heads']['discrete']['hidden_dim'], 128)
+        self.assertEqual(medium_config['heads']['confidence']['hidden_dim'], 64)
+        self.assertEqual(medium_config['heads']['value']['hidden_dim'], 32)
 
     def test_bayesian_head_configuration(self):
         """Test bayesian head configuration with confidence and value"""

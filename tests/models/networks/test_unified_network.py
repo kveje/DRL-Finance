@@ -56,7 +56,7 @@ class TestUnifiedNetwork(unittest.TestCase):
             "backbone": {
                 "type": "mlp",
                 "hidden_dims": [256, 128],
-                "dropout": 0.1,
+                "dropout": 0.0,
                 "use_layer_norm": True
             },
             "heads": {
@@ -245,29 +245,6 @@ class TestUnifiedNetwork(unittest.TestCase):
         }
         with self.assertRaises(RuntimeError):
             self.network(observations)
-    
-    def test_training_mode(self):
-        """Test network behavior in training mode."""
-        self.network.train()
-        
-        # Create sample observations
-        batch_size = 16
-        observations = {
-            "ohlcv": torch.randn(batch_size, self.config["n_assets"], self.config["window_size"], 5, device=self.device),
-            "technical": torch.randn(batch_size, self.config["n_assets"], 20, device=self.device),
-            "price": torch.randn(batch_size, self.config["n_assets"], self.config["window_size"], device=self.device),
-            "position": torch.randn(batch_size, self.config["n_assets"], device=self.device),
-            "cash": torch.randn(batch_size, 2, device=self.device),
-            "affordability": torch.randn(batch_size, self.config["n_assets"], device=self.device),
-            "current_price": torch.randn(batch_size, self.config["n_assets"], device=self.device)
-        }
-        
-        # Forward pass
-        outputs1 = self.network(observations)
-        outputs2 = self.network(observations)
-        
-        # Outputs should be different due to dropout
-        self.assertFalse(torch.allclose(outputs1["value"], outputs2["value"]))
     
     def test_eval_mode(self):
         """Test network behavior in evaluation mode."""

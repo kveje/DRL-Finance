@@ -402,13 +402,13 @@ class TestConfidenceScaledInterpreter(unittest.TestCase):
         # Check that all expected keys are present
         expected_keys = {
             'n_assets',
-            'max_position_size',
+            'max_trade_size',
         }
         self.assertEqual(set(config.keys()), expected_keys)
         
         # Check that values match the interpreter's attributes
         self.assertEqual(config['n_assets'], self.interpreter.n_assets)
-        self.assertEqual(config['max_position_size'], self.interpreter.max_trade_size)
+        self.assertEqual(config['max_trade_size'], self.interpreter.max_trade_size)
 
     def test_interpret_batch(self):
         """Test interpret method with batch input."""
