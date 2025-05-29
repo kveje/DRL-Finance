@@ -1,0 +1,17 @@
+# Core dependencies
+numpy
+pandas
+matplotlib
+seaborn
+torch
+torchvision
+torchaudio
+torchrl
+
+# RL libraries
+gym
+gymnasium
+
+# Financial data
+yfinance
+finrl
