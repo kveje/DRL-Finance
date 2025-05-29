@@ -1,4 +1,7 @@
+# VSCode
 */.DS_Store
+
+# Python
 */__pycache__
 */.ipynb_checkpoints
 */.vscode
@@ -12,10 +15,33 @@
 *.cpython-312.pyc
 *.csv
 *.cpython-312.pyc
+
+# Data
 data/raw/
 data/processed/
 data/normalized/
+
+# Models
 *.pt
-README.PDF
+
+# Experiments
 experiments/
+
+# Logs
 logs/
+*.log
+
+# Data and results
+data/
+experiments/
+results/
+
+# Cloud deployment (keep scripts, ignore generated files)
+cloud_deployment/startup_scripts/
+cloud_deployment/experiments_list.json
+
+# Environment
+.env
+.venv
+venv/
+ENV/
