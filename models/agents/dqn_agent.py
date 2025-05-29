@@ -75,7 +75,7 @@ class DQNAgent(BaseAgent):
         self.learning_rate = learning_rate
         
         # Initialize replay memory
-        self.memory_device = "cpu"
+        self.memory_device = self.device
         self.memory = ReplayBuffer(
             storage=LazyTensorStorage(max_size=memory_size,
                                       device=self.memory_device),
@@ -121,10 +121,11 @@ class DQNAgent(BaseAgent):
         # Get network outputs
         with torch.no_grad():
             # Use sampling if not deterministic and Bayesian is enabled
-            network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature = self.temperature_manager.get_all_temperatures())
+            network_outputs = self.network(obs_tensors,
+                                           use_sampling=use_sampling, 
+                                           temperature = self.temperature_manager.get_all_temperatures())
         
-        # Move the network outputs to memory device
-        network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
+        network_outputs = {k: v.detach().to(self.memory_device) for k, v in network_outputs.items()}
 
         # Epsilon-greedy action selection
         if not deterministic and random.random() < self.epsilon:
@@ -139,9 +140,9 @@ class DQNAgent(BaseAgent):
                 deterministic=True
             )
 
-        # Convert to numpy
-        scaled_action = scaled_action.numpy()
-        action_choice = action_choice.numpy()
+        # Network outputs were on cpu
+        scaled_action = scaled_action.cpu().numpy()
+        action_choice = action_choice.cpu().numpy()
         
         return scaled_action, action_choice
     
@@ -173,11 +174,18 @@ class DQNAgent(BaseAgent):
         dones = batch['dones'] # Tensor [batch_size, 1]
 
         # Move the batch to the device
-        obs = {k: v.to(self.device) for k, v in obs.items()}
-        action_choices = action_choices.to(self.device)
-        rewards = rewards.to(self.device)
-        next_obs = {k: v.to(self.device) for k, v in next_obs.items()}
-        dones = dones.to(self.device)
+        if self.memory_device != self.device:
+            obs = {k: v.to(self.device) for k, v in obs.items()}
+            action_choices = action_choices.to(self.device)
+            rewards = rewards.to(self.device)
+            next_obs = {k: v.to(self.device) for k, v in next_obs.items()}
+            dones = dones.to(self.device)
+        else:
+            obs = {k: v for k, v in obs.items()}
+            action_choices = action_choices
+            rewards = rewards
+            next_obs = {k: v for k, v in next_obs.items()}
+            dones = dones
         
         # Get current network outputs
         current_outputs = self.network(obs, use_sampling=False, temperature = self.temperature_manager.get_all_temperatures())

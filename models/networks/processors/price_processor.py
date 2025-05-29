@@ -85,7 +85,7 @@ class PriceProcessor(BaseProcessor):
         batch_size, n_assets, window_size = x.shape
 
         # Step 1: Reshape for per-asset processing
-        x = x.view(batch_size * n_assets, 1, window_size) # shape: (batch_size * n_assets, 1, window_size)
+        x = x.reshape(batch_size * n_assets, 1, window_size) # shape: (batch_size * n_assets, 1, window_size)
 
         # Step 2: Get asset embeddings
         asset_embeddings = self.asset_encoder(x) # shape: (batch_size * n_assets, asset_embedding_dim)
@@ -127,7 +127,7 @@ class PriceProcessor(BaseProcessor):
 
         batch_size, n_assets, window_size = x.shape
 
-        x_reshaped = x.view(batch_size * n_assets, 1, window_size)
+        x_reshaped = x.reshape(batch_size * n_assets, 1, window_size)
         asset_embeddings = self.asset_encoder(x_reshaped) # shape: (batch_size * n_assets, asset_embedding_dim)
         asset_embeddings = asset_embeddings.view(batch_size, n_assets, -1) # shape: (batch_size, n_assets, asset_embedding_dim)
         return asset_embeddings

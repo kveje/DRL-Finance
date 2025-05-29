@@ -79,12 +79,12 @@ class UnifiedNetwork(nn.Module):
                 n_assets=self.n_assets
             )
 
-        # Technical Processor
-        if processor_configs.get("technical", {}).get("enabled", False):
-            self.processors["technical"] = TechProcessor(
+        # Tech Processor
+        if processor_configs.get("tech", {}).get("enabled", False):
+            self.processors["tech"] = TechProcessor(
                 n_assets=self.n_assets,
-                tech_dim=processor_configs["technical"].get("tech_dim", 20),
-                hidden_dim=processor_configs["technical"].get("hidden_dim", 64),
+                tech_dim=processor_configs["tech"].get("tech_dim", 20),
+                hidden_dim=processor_configs["tech"].get("hidden_dim", 64),
                 device=self.device
             )
 

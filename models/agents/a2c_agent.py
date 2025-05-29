@@ -66,7 +66,7 @@ class A2CAgent(BaseAgent):
         self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
         
         # Storage for rollout data
-        self.memory_device = "cpu"
+        self.memory_device = self.device
         self.rollout: List[TensorDict] = []
         self.max_rollout_size = update_frequency
         
@@ -111,21 +111,23 @@ class A2CAgent(BaseAgent):
         use_sampling = self.use_bayesian and sample
         # Get network outputs
         with torch.no_grad():
-            network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature = self.temperature_manager.get_all_temperatures())
-
-            # Move the network outputs to memory device
-            network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
+            network_outputs = self.network(obs_tensors, 
+                                           use_sampling=use_sampling, 
+                                           temperature = self.temperature_manager.get_all_temperatures())
             
-            # Sample from policy
-            scaled_action, action_choice, log_probs = self.interpreter.interpret_with_log_prob(network_outputs)
+        # Move the network outputs to memory device
+        network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
+        
+        # Sample from policy
+        scaled_action, action_choice, log_probs = self.interpreter.interpret_with_log_prob(network_outputs)
 
         # Store value and log probs for training
         self.last_log_probs = log_probs
         self.last_value = network_outputs["value"]
 
-        # Convert to numpy
-        scaled_action = scaled_action.numpy()
-        action_choice = action_choice.numpy()
+        # Convert to numpy and move to cpu (for environment)
+        scaled_action = scaled_action.cpu().numpy()
+        action_choice = action_choice.cpu().numpy()
             
         return scaled_action, action_choice
     
@@ -151,12 +153,12 @@ class A2CAgent(BaseAgent):
         """
         # Convert observations to tensors
         obs_tensors = {
-            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in observation.items()
         }
 
         next_obs_tensors = {
-            k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
+            k: torch.as_tensor(v, dtype=torch.float32)
             for k, v in next_observation.items()
         }
         
@@ -234,7 +236,11 @@ class A2CAgent(BaseAgent):
             rollout = self.rollout
 
         # Stack list of TensorDicts into a single TensorDict
-        rollout = TensorDict.stack(rollout, dim = 0).to(self.device)
+        # Move them to the network device (self.device)
+        if self.memory_device != self.device:
+            rollout = TensorDict.stack(rollout, dim = 0).to(self.device)
+        else:
+            rollout = TensorDict.stack(rollout, dim = 0)
 
         # Get data from rollout
         obs = rollout["obs"]
@@ -377,8 +383,8 @@ class A2CAgent(BaseAgent):
             "value_loss": getattr(self, 'last_value_loss', 0),
             "entropy_loss": getattr(self, 'last_entropy_loss', 0),
             "total_loss": getattr(self, 'last_total_loss', 0),
-            "mean_advantage": getattr(self, 'mean_advantage', 0),
-            "mean_return": getattr(self, 'mean_return', 0)
+            "mean_advantage": getattr(self, 'last_mean_advantage', 0),
+            "mean_return": getattr(self, 'last_mean_return', 0)
         }
         if self.use_bayesian:
             info.update(self.temperature_manager.get_all_temperatures_printerfriendly())

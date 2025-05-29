@@ -79,7 +79,7 @@ class SACAgent(BaseAgent):
         self.use_bayesian = use_bayesian
 
         # Initialize replay memory
-        self.memory_device = "cpu"
+        self.memory_device = device
         self.memory = ReplayBuffer(
             storage=LazyTensorStorage(max_size=memory_size, device=self.memory_device),
             batch_size=batch_size,
@@ -113,7 +113,6 @@ class SACAgent(BaseAgent):
         self.steps = 0
 
         # Last values
-        self.last_loss = 0.0
         self.last_critic_1_loss = 0.0
         self.last_critic_2_loss = 0.0
         self.last_actor_loss = 0.0
@@ -143,18 +142,30 @@ class SACAgent(BaseAgent):
             for k, v in observations.items()
         }
 
+        # If we are using bayesian, we need to sample from the distribution
         use_sampling = self.use_bayesian and sample
-
         with torch.no_grad():
-            if deterministic:
-                # Use the mean/mode action
-                network_outputs = self.network(obs_tensors, use_sampling=False, temperature=self.temperature_manager.get_all_temperatures())
-                scaled_action, action_choice = self.interpreter.interpret(network_outputs, deterministic=True)
-            else:
-                # Sample from the policy
-                network_outputs = self.network(obs_tensors, use_sampling=use_sampling, temperature=self.temperature_manager.get_all_temperatures())
-                scaled_action, action_choice, _ = self.interpreter.interpret_with_log_prob(network_outputs)
-        return scaled_action.cpu().numpy(), action_choice.cpu().numpy()
+            # Get the network outputs
+            network_outputs = self.network(obs_tensors, 
+                                           use_sampling=use_sampling, 
+                                           temperature=self.temperature_manager.get_all_temperatures())
+            
+        # Move the network outputs to the memory device if they are not already there
+        network_outputs = {k: v.to(self.memory_device) for k, v in network_outputs.items()}
+
+        # Interpret the network outputs
+        if deterministic:
+            scaled_action, action_choice = self.interpreter.interpret(network_outputs, 
+                                                                      deterministic=True)
+        else:
+            scaled_action, action_choice = self.interpreter.interpret(network_outputs, 
+                                                                      deterministic=False)
+        
+        # Convert to numpy and move to cpu (for environment)
+        scaled_action = scaled_action.cpu().numpy()
+        action_choice = action_choice.cpu().numpy()
+
+        return scaled_action, action_choice
 
     def update(self, batch: Optional[TensorDict] = None) -> Dict[str, float]:
         """
@@ -175,11 +186,12 @@ class SACAgent(BaseAgent):
         dones = batch['dones']
 
         # Move to device
-        obs = {k: v.to(self.device) for k, v in obs.items()}
-        action_choices = action_choices.to(self.device)
-        rewards = rewards.to(self.device)
-        next_obs = {k: v.to(self.device) for k, v in next_obs.items()}
-        dones = dones.to(self.device)
+        if self.memory_device != self.device:
+            obs = {k: v.to(self.device) for k, v in obs.items()}
+            action_choices = action_choices.to(self.device)
+            rewards = rewards.to(self.device)
+            next_obs = {k: v.to(self.device) for k, v in next_obs.items()}
+            dones = dones.to(self.device)
 
         # --- Critic update ---
         # Sample next actions and log probs from the current policy
@@ -205,23 +217,28 @@ class SACAgent(BaseAgent):
         
         # Optimize critics
         self.critic_1_optimizer.zero_grad()
-        critic_1_loss.backward()
-        critic_1_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_1.parameters(), 1.0)
-        self.critic_1_optimizer.step()
         self.critic_2_optimizer.zero_grad()
+
+        critic_1_loss.backward(retain_graph=True)
         critic_2_loss.backward()
+
+        critic_1_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_1.parameters(), 1.0)
         critic_2_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_2.parameters(), 1.0)
+
+        self.critic_1_optimizer.step()
         self.critic_2_optimizer.step()
 
         # --- Actor update ---
         policy_outputs = self.network(obs, use_sampling=True, temperature=self.temperature_manager.get_all_temperatures())
         _, new_action_choices, log_probs = self.interpreter.interpret_with_log_prob(policy_outputs)
+
         q1_new = self.interpreter.get_q_values(self.critic_1(obs), new_action_choices)
         q2_new = self.interpreter.get_q_values(self.critic_2(obs), new_action_choices)
         min_q_new = torch.min(q1_new, q2_new)
         
         # Actor loss: maximize Q + entropy
         actor_loss = (self.alpha * log_probs - min_q_new).mean()
+
         self.optimizer.zero_grad()
         actor_loss.backward()
         actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
@@ -235,26 +252,30 @@ class SACAgent(BaseAgent):
             self.alpha_optimizer.step()
             self.alpha = self.log_alpha.exp().item()
         else:
-            alpha_loss = torch.tensor(0.0)
+            alpha_loss = torch.tensor(0.0, device=self.device)
         
         # --- Soft update of target networks ---
         with torch.no_grad():
-            for target_param, param in zip(self.critic_target_1.parameters(), self.critic_1.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-            for target_param, param in zip(self.critic_target_2.parameters(), self.critic_2.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+            for (target_param1, param1), (target_param2, param2) in zip(
+                zip(self.critic_target_1.parameters(), self.critic_1.parameters()),
+                zip(self.critic_target_2.parameters(), self.critic_2.parameters())
+            ):
+                target_param1.data.mul_(1 - self.tau).add_(param1.data, alpha=self.tau)
+                target_param2.data.mul_(1 - self.tau).add_(param2.data, alpha=self.tau)
         
         self.steps += 1
 
+        def safe_item(tensor):
+            return tensor.detach().cpu().item() if hasattr(tensor, 'item') else float(tensor)
+
         # Store last values
-        self.last_loss = actor_loss.detach().cpu().item()
-        self.last_critic_1_loss = critic_1_loss.detach().cpu().item()
-        self.last_critic_2_loss = critic_2_loss.detach().cpu().item()
-        self.last_actor_loss = actor_loss.detach().cpu().item()
-        self.last_alpha_loss = alpha_loss.detach().cpu().item() if self.automatic_entropy_tuning else 0.0
-        self.last_critic_1_grad_norm = critic_1_grad_norm.detach().cpu().item() if hasattr(critic_1_grad_norm, 'item') else float(critic_1_grad_norm)
-        self.last_critic_2_grad_norm = critic_2_grad_norm.detach().cpu().item() if hasattr(critic_2_grad_norm, 'item') else float(critic_2_grad_norm)
-        self.last_actor_grad_norm = actor_grad_norm.detach().cpu().item() if hasattr(actor_grad_norm, 'item') else float(actor_grad_norm)
+        self.last_critic_1_loss = safe_item(critic_1_loss)
+        self.last_critic_2_loss = safe_item(critic_2_loss)
+        self.last_actor_loss = safe_item(actor_loss)
+        self.last_alpha_loss = safe_item(alpha_loss)
+        self.last_critic_1_grad_norm = safe_item(critic_1_grad_norm)
+        self.last_critic_2_grad_norm = safe_item(critic_2_grad_norm)
+        self.last_actor_grad_norm = safe_item(actor_grad_norm)
 
         metrics = {
             "critic_1_loss": self.last_critic_1_loss,
@@ -415,7 +436,6 @@ class SACAgent(BaseAgent):
         """
         info = {
             'alpha': self.alpha,
-            'loss': self.last_loss,
             'critic_1_loss': self.last_critic_1_loss,
             'critic_2_loss': self.last_critic_2_loss,
             'actor_loss': self.last_actor_loss,
