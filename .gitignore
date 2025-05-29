@@ -39,6 +39,7 @@ results/
 # Cloud deployment (keep scripts, ignore generated files)
 cloud_deployment/startup_scripts/
 cloud_deployment/experiments_list.json
+cloud_config.json
 
 # Environment
 .env
