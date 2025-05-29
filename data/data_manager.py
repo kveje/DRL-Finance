@@ -413,6 +413,41 @@ class DataManager:
             result = add_day_index(result, "date")
 
         return result
+    
+    def simple_normalize_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Normalize data using the specified method and feature groups.
+
+        Args:
+            data: DataFrame to normalize
+
+        Returns:
+            Normalized DataFrame
+        """
+        # Copy data
+        result = data.copy()
+
+        # Exclude columns
+        exclude_columns = {"date", "ticker", "symbol", "day", "day_index", "time_index", "timestamp"}
+
+        # OHLCV data should be percentage, grouped by ticker
+        ohlcv_columns = ["open", "high", "low", "close", "volume"]
+        for col in ohlcv_columns:
+            result[col] = result.groupby("ticker")[col].pct_change().fillna(0)
+
+        # Technical indicators should be zscore (not grouped by ticker)
+        non_ohlcv_columns = set(col for col in result.columns if col not in ohlcv_columns)
+        technical_columns = list(non_ohlcv_columns - exclude_columns)
+        
+        for col in technical_columns:
+            if col.startswith("linreg"):
+                result[col] = result[col].fillna(0)
+            else:
+                mean_val = result[col].mean()
+                std_val = result[col].std()
+                result[col] = (result[col] - mean_val) / std_val
+                result[col] = result[col].fillna(0)
+
+        return result
 
     def prepare_data(
         self,
