@@ -53,7 +53,7 @@ def upload_results_to_gcs(experiment_name, bucket_name):
 def install_dependencies():
     """Install required dependencies."""
     logger.info("Installing dependencies...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "gc_requirements.txt"], check=True)
 
 def run_experiment(experiment_name, agent_type, interpreter_type, use_bayesian, reward_type, indicator_type, reward_projection_period, price_type, n_episodes):
     """Run a single experiment."""
