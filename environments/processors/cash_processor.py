@@ -8,14 +8,17 @@ class CashProcessor(BaseProcessor):
     Provides normalized cash balance and remaining available cash as features.
     """
     
-    def __init__(self, cash_limit: float):
+    def __init__(self, cash_limit: float, 
+                 raw_data_feature_indices: Dict[str, int], 
+                 processed_data_feature_indices: Dict[str, int],
+                 tech_col_indices: Dict[str, int]):
         """
         Initialize the cash processor.
         
         Args:
             cash_limit (float): Maximum allowed cash balance
         """
-        super().__init__()
+        super().__init__(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices)
         self.cash_limit = cash_limit
         
     def process(self, cash_balance: float) -> np.ndarray:

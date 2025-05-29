@@ -9,7 +9,15 @@ class AffordabilityProcessor(BaseProcessor):
     Provides normalized affordability information as features.
     """
     
-    def __init__(self, n_assets: int, min_cash_limit: float = 0.0, max_trade_size: int = 10, price_col: str = "close", transaction_cost: float = 0.001, slippage_mean: float = 0.0):
+    def __init__(self, n_assets: int, 
+                 min_cash_limit: float = 0.0, 
+                 max_trade_size: int = 10, 
+                 price_col: str = "close", 
+                 transaction_cost: float = 0.001, 
+                 slippage_mean: float = 0.0, 
+                 raw_data_feature_indices: Dict[str, int] = None, 
+                 processed_data_feature_indices: Dict[str, int] = None,
+                 tech_col_indices: Dict[str, int] = None):
         """
         Initialize the affordability processor.
         
@@ -21,7 +29,7 @@ class AffordabilityProcessor(BaseProcessor):
             slippage_mean (float): Mean slippage
             n_assets (int): Number of assets
         """
-        super().__init__()
+        super().__init__(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices)
         self.min_cash_limit = min_cash_limit
         self.max_trade_size = max_trade_size
         self.price_col = price_col
@@ -29,18 +37,20 @@ class AffordabilityProcessor(BaseProcessor):
         self.slippage_mean = slippage_mean
         self.n_assets = n_assets
 
-    def process(self, raw_data: pd.DataFrame, current_cash: float, step: int) -> np.ndarray:
+    def process(self, raw_data: np.ndarray, current_cash: float, step: int) -> np.ndarray:
         """
         Process the affordability information.
         
         Args:
-            raw_data (pd.DataFrame): Dataframe containing the raw data
+            raw_data (np.ndarray): Numpy array containing the raw data with shape (n_steps, n_assets, n_features)
+            current_cash (float): Current cash balance
+            step (int): Current step
             
         Returns:
             np.ndarray: Affordability information
         """
         # Get the current prices
-        current_prices = np.array(raw_data[self.price_col].loc[step], dtype=np.float32)
+        current_prices = raw_data[step, :, self.raw_data_feature_indices[self.price_col]]
         adjusted_prices = current_prices * (1 + self.transaction_cost + self.slippage_mean)
 
         # Calculate the available cash

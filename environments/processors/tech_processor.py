@@ -12,7 +12,10 @@ class TechProcessor(BaseProcessor):
     def __init__(
         self,
         tech_cols: List[str],
-        asset_list: List[str] = []
+        asset_list: List[str] = [],
+        raw_data_feature_indices: Dict[str, int] = None,
+        processed_data_feature_indices: Dict[str, int] = None,
+        tech_col_indices: List[int] = None,
     ):
         """
         Initialize the technical indicators processor.
@@ -21,38 +24,25 @@ class TechProcessor(BaseProcessor):
             tech_cols: List of technical indicator column names
             asset_list: List of asset tickers to process
         """
+        super().__init__(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices)
         self.tech_cols = tech_cols
         self.asset_list = asset_list
         self.n_assets = len(self.asset_list)
         self.tech_dim = len(self.tech_cols)
-    
-    def process(self, data: pd.DataFrame, current_step: int) -> np.ndarray:
+
+    def process(self, processed_data: np.ndarray, current_step: int) -> np.ndarray:
         """
         Process the technical indicators into a 2D array.
         Only takes the current time point's technical indicators.
         
         Args:
-            data: DataFrame containing the technical indicators with day as index
-            current_step: Current step in the environment
+            processed_data (np.ndarray): Numpy array containing the processed data with shape (n_steps, n_assets, n_features)
+            current_step (int): Current step in the environment
             
         Returns:
             np.ndarray: Technical indicators matrix of shape (n_assets, tech_dim)
         """
-        # Initialize the technical indicators matrix
-        tech_data = np.zeros((self.n_assets, self.tech_dim))
-
-        # For each asset, extract its technical indicators
-        for i, asset in enumerate(self.asset_list):
-            # Get the current data point
-            asset_data = data[data['ticker'] == asset].loc[current_step]
-
-            # Process technical indicators
-            tech_data[i, :] = asset_data[self.tech_cols].values
-
-        # Convert to float32
-        tech_data = tech_data.astype(np.float32)
-            
-        return tech_data
+        return processed_data[current_step, :, self.tech_col_indices]
     
     def get_observation_space(self) -> Dict[str, Dict[str, Any]]:
         """

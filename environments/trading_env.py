@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from gym import spaces
 import random
-
+import time
 # Initialize the logger
 from utils.logger import Logger
 logger = Logger.get_logger()
@@ -28,12 +28,12 @@ class TradingEnv(BaseTradingEnv):
         self,
         processed_data: pd.DataFrame,
         raw_data: pd.DataFrame,
-        columns: Dict[str, Union[str, List[str]]], # {ticker: "ticker", price: "close", day: "day", ohlcv: ["open", "high", "low", "close", "volume"], tech_cols: ["RSI", "MACD", "Bollinger Bands"]}
-        env_params: Dict[str, Any] = {}, # {initial_balance: 100000.0, window_size: 10}
-        friction_params: Dict[str, Dict[str, float]] = {}, # {slippage: {slippage_mean: 0.0, slippage_std: 0.001}, commission: {commission_rate: 0.001}}
-        reward_params: Dict[str, Any] = {}, # {"returns": {"scale": 1.0}}
-        constraint_params: Dict[str, Dict[str, float]] = {}, # {position_limits: {min: -1000, max: 1000}}
-        processor_configs: List[Dict[str, Any]] = None, # List of processor configurations
+        columns: Dict[str, Union[str, List[str]]],
+        env_params: Dict[str, Any] = {},
+        friction_params: Dict[str, Dict[str, float]] = {},
+        reward_params: Dict[str, Any] = {},
+        constraint_params: Dict[str, Dict[str, float]] = {},
+        processor_configs: List[Dict[str, Any]] = None,
         seed: Optional[int] = None,
         render_mode: Optional[str] = None,
     ):
@@ -63,28 +63,23 @@ class TradingEnv(BaseTradingEnv):
         self.tech_cols: List[str] = columns.get("tech_cols", [])
         self.market_cols: List[str] = self.ohlcv_cols + self.tech_cols
 
-        # Data setup - ensure day is the index
-        if processed_data.index.name != self.day_col:
-            logger.info(f"Setting {self.day_col} as index for processed_data")
-            self.processed_data: pd.DataFrame = processed_data.set_index(self.day_col)
-        else:
-            self.processed_data: pd.DataFrame = processed_data
 
-        if raw_data.index.name != self.day_col:
-            logger.info(f"Setting {self.day_col} as index for raw_data")
-            self.raw_data: pd.DataFrame = raw_data.set_index(self.day_col)
-        else:
-            self.raw_data: pd.DataFrame = raw_data
+        self.processed_data: pd.DataFrame = processed_data
+        self.raw_data: pd.DataFrame = raw_data
 
         # Save columns
         self.columns = columns
 
         # Get max step
-        self.max_step = self.processed_data.index.max()
+        self.max_step = self.processed_data[self.day_col].max()
 
         # Asset setup
         self.asset_list: List[str] = list(processed_data[self.tic_col].unique()) # List of asset tickers
         self.n_assets = len(self.asset_list)
+
+        # Precompute data arrays
+        self._precompute_data_arrays()
+        logger.info(f"Precomputed data arrays to vectorized operations")
 
         # Environment parameters
         self.env_params = env_params
@@ -102,7 +97,7 @@ class TradingEnv(BaseTradingEnv):
         self.market_frictions = MarketFrictionManager(friction_params)
         self.constraint_manager = ConstraintManager(constraint_params)
         self.action_validator = ActionValidator(self.constraint_manager)
-        self.reward_manager = RewardManager(reward_params)
+        self.reward_manager = RewardManager(reward_params, self.raw_data_feature_indices)
 
         # Save the parameters
         self.env_params = env_params
@@ -122,8 +117,9 @@ class TradingEnv(BaseTradingEnv):
             shape=(self.n_assets,),
             dtype=np.int32,
         )
-        
-        self.processor = CompositeProcessor(processor_configs)
+
+        # Initialize processor
+        self.processor = CompositeProcessor(processor_configs, self.raw_data_feature_indices, self.processed_data_feature_indices, self.tech_col_indices)
         
         # Update observation space based on processor
         self.observation_space = spaces.Dict(self.processor.get_observation_space())
@@ -131,7 +127,7 @@ class TradingEnv(BaseTradingEnv):
         # Initialize state
         self.current_step = self.window_size
         self.done = False
-        self.info = {}        
+        self.info = {}
 
         # Set rendering mode
         self.render_mode = render_mode
@@ -164,7 +160,11 @@ class TradingEnv(BaseTradingEnv):
         self.reward_manager.reset()
         
         # Get observation
-        observation = self._get_observation()
+        observation = self.processor.process(raw_data = self.raw_matrix, 
+                                    processed_data = self.processed_matrix, 
+                                    current_step = self.current_step, 
+                                    position = self.positions, 
+                                    cash = self.current_cash)
         
         return observation
 
@@ -203,18 +203,22 @@ class TradingEnv(BaseTradingEnv):
         # Use the feasible_action and adjusted_prices for execution
         self._execute_trades(feasible_action, adjusted_prices)
 
-        # --- 5. Post-computation and State Update ---
-        # Portfolio value is updated within _execute_trades based on feasible action
-        self.current_step += 1
-
-        # --- 6. Calculate Reward ---
+        # --- 5. Calculate Reward ---
         # Reward is based on the change in portfolio value and constraint violations
         reward, reward_components = self.reward_manager.calculate(
             portfolio_value=self.portfolio_value,
             previous_portfolio_value=previous_portfolio_value,
             intended_action=intended_action,
             feasible_action=feasible_action,
+            raw_data=self.raw_matrix,
+            current_day=self.current_step,
+            current_position=current_positions,
+            cash_balance=current_cash
         )
+
+        # --- 6. Post-computation and State Update ---
+        # Portfolio value is updated within _execute_trades based on feasible action
+        self.current_step += 1
 
         # --- 7. Check if episode is done ---
         self.done = self._is_done()
@@ -231,7 +235,11 @@ class TradingEnv(BaseTradingEnv):
         )
 
         # --- 9. Get Next Observation ---
-        observation = self._get_observation()
+        observation = self.processor.process(raw_data = self.raw_matrix, 
+                                    processed_data = self.processed_matrix, 
+                                    current_step = self.current_step, 
+                                    position = self.positions, 
+                                    cash = self.current_cash)
 
         return observation, reward, self.done, self.info
 
@@ -242,14 +250,8 @@ class TradingEnv(BaseTradingEnv):
         Returns:
             np.ndarray: Array of current prices for all assets
         """
-        # Get current day's data for all assets
-        current_data = self.raw_data.loc[self.current_step]
-        
         # Extract prices for each asset in the correct order
-        prices = np.array([
-            current_data[current_data[self.tic_col] == asset][self.price_col].iloc[0]
-            for asset in self.asset_list
-        ], dtype=np.float32)
+        prices = self.raw_matrix[self.current_step, :, self.raw_data_feature_indices[self.price_col]]
         
         return prices
 
@@ -282,36 +284,14 @@ class TradingEnv(BaseTradingEnv):
     def _calculate_portfolio_value(self, positions: np.ndarray, prices: np.ndarray) -> float:
         """Calculate the total portfolio value."""
         return self.current_cash + np.sum(positions * prices)
-
-    def _get_observation(self) -> Dict[str, np.ndarray]:
-        """
-        Get the current observation for the agent using the composite processor.
         
-        Returns:
-            Dict[str, np.ndarray]: Dictionary with observation data
-        """
-        # Prepare data for processors
-        data = {
-            'market': self.processed_data,
-            'cash': self.current_cash,
-            'position': self.positions,
-            'raw': self.raw_data,
-            'step': self.current_step
-        }
-        
-        # Process data using the composite processor
-        observation = self.processor.process(data)
-        
-        return observation
 
     def _is_done(self) -> bool:
         """Check if the episode is done."""
         # Episode ends when we reach the maximum day
         if self.current_step >= self.max_step:
             return True
-            
-        # TODO: Might add other termination conditions here
-        
+                
         return False
 
     def _update_info(self, previous_value: float, current_value: float, intended_action: np.ndarray, feasible_action: np.ndarray, reward: float, reward_components: Dict[str, float]) -> Dict[str, Any]:
@@ -335,14 +315,14 @@ class TradingEnv(BaseTradingEnv):
             "step": self.current_step,
             "portfolio_value": current_value,
             "cash": self.current_cash,
-            "positions": self.positions.copy(), # Return copy
-            "asset_values": self.asset_values.copy(), # Return copy
-            "prices": current_prices.copy(), # Include current prices for backtesting
+            "positions": self.positions,
+            "asset_values": self.asset_values,
+            "prices": current_prices,
             "period_return": period_return,
             "cumulative_return": cumulative_return,
-            "intended_action": intended_action.copy(),
-            "feasible_action": feasible_action.copy(),
-            "action_clipping": clipping_details.copy(),
+            "intended_action": intended_action,
+            "feasible_action": feasible_action,
+            "action_clipping": clipping_details,
             "reward": reward,
             "reward_components": reward_components,  # Add individual reward components
             "reward_statistics": reward_stats,  # Add reward component statistics
@@ -448,3 +428,49 @@ class TradingEnv(BaseTradingEnv):
             # This will be used by the render method
             for key, value in agent_info.items():
                 self.info[key] = value
+    
+    def _precompute_data_arrays(self) -> None:
+        """Precompute data arrays for faster processing."""
+        # Remove date column from original data if present (original data is pd.DataFrame)
+        if "date" in self.raw_data.columns:
+            self.raw_data = self.raw_data.drop(columns=["date"])
+        if "date" in self.processed_data.columns:
+            self.processed_data = self.processed_data.drop(columns=["date"])
+
+        # Reset index, but keep the day column
+        self.raw_data = self.raw_data.reset_index(drop=True)
+        self.processed_data = self.processed_data.reset_index(drop=True)
+
+        # Make data double indexed by day and ticker
+        self.raw_data = self.raw_data.set_index([self.day_col, self.tic_col])
+        self.processed_data = self.processed_data.set_index([self.day_col, self.tic_col])
+
+        # Create feature indice mapping
+        self.raw_data_feature_indices = {column_name: i for i, column_name in enumerate(self.raw_data.columns)}
+        self.processed_data_feature_indices = {column_name: i for i, column_name in enumerate(self.processed_data.columns)}
+        self._asset_to_idx = {asset: i for i, asset in enumerate(self.asset_list)}
+
+
+        # Save list of columns
+        self.raw_data_cols = list(self.raw_data_feature_indices.keys())
+        self.processed_data_cols = list(self.processed_data_feature_indices.keys())
+
+        # Initialize matrices (day, asset, feature)
+        self.raw_matrix = np.zeros((self.max_step + 1, self.n_assets, len(self.raw_data_cols)), dtype=np.float32)
+        self.processed_matrix = np.zeros((self.max_step + 1, self.n_assets, len(self.processed_data_cols)), dtype=np.float32)
+
+        # Save list of technical and OHLCV column indices
+        self.tech_col_indices = [self.processed_data_feature_indices[col] for col in self.tech_cols]
+        self.ohlcv_col_indices = [self.raw_data_feature_indices[col] for col in self.ohlcv_cols]
+
+        # Precompute the raw matrix
+        for (day, ticker), group in self.raw_data.groupby([self.day_col, self.tic_col]):
+            if day <= self.max_step and ticker in self.asset_list:
+                asset_index = self._asset_to_idx[ticker]
+                self.raw_matrix[day, asset_index, :] = group[self.raw_data_cols].values.squeeze()
+
+        # Precompute the processed matrix
+        for (day, ticker), group in self.processed_data.groupby([self.day_col, self.tic_col]):
+            if day <= self.max_step and ticker in self.asset_list:
+                asset_index = self._asset_to_idx[ticker]
+                self.processed_matrix[day, asset_index, :] = group[self.processed_data_cols].values.squeeze()

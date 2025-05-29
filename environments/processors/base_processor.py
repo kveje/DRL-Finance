@@ -8,6 +8,12 @@ class BaseProcessor(ABC):
     Base class for all data processors.
     Each processor should implement methods for processing data and defining observation spaces.
     """
+    def __init__(self, raw_data_feature_indices: Dict[str, int],
+                processed_data_feature_indices: Dict[str, int],
+                tech_col_indices: Dict[str, int]):
+        self.raw_data_feature_indices = raw_data_feature_indices
+        self.processed_data_feature_indices = processed_data_feature_indices
+        self.tech_col_indices = tech_col_indices
     
     @abstractmethod
     def process(self, data: Any) -> np.ndarray:

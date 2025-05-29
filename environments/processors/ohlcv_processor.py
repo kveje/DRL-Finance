@@ -12,7 +12,10 @@ class OHLCVProcessor(BaseProcessor):
         self,
         ohlcv_cols: List[str],
         window_size: int = 10,
-        asset_list: List[str] = []
+        asset_list: List[str] = [],
+        raw_data_feature_indices: Dict[str, int] = None,
+        processed_data_feature_indices: Dict[str, int] = None,
+        tech_col_indices: Dict[str, int] = None
     ):
         """
         Initialize the OHLCV processor.
@@ -22,44 +25,27 @@ class OHLCVProcessor(BaseProcessor):
             window_size: Size of the lookback window
             asset_list: List of asset tickers to process
         """
+        super().__init__(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices)
         self.ohlcv_cols = ohlcv_cols
         self.window_size = window_size
         self.asset_list = asset_list
         self.n_assets = len(self.asset_list)
         self.ohlcv_dim = len(self.ohlcv_cols)
-    
-    def process(self, data: pd.DataFrame, current_step: int) -> np.ndarray:
+        self.ohlcv_indices = [self.processed_data_feature_indices[col] for col in self.ohlcv_cols]
+
+    def process(self, processed_data: np.ndarray, current_step: int) -> np.ndarray:
         """
         Process the OHLCV data into a matrix.
         
         Args:
-            data: DataFrame containing the OHLCV data with day as index
+            processed_data: Numpy array containing the processed data with shape (n_steps, n_assets, n_features)
             current_step: Current step in the environment
             
         Returns:
             np.ndarray: OHLCV data matrix of shape (n_assets, ohlcv_dim, window_size)
         """
-        # Initialize the OHLCV data matrix
-        ohlcv_data = np.zeros((self.n_assets, self.ohlcv_dim, self.window_size))
-        
-        # Get the window of data
-        window = list(range(current_step - self.window_size, current_step))
-        if window[0] < 0:
-            raise ValueError(f"Window is negative. Current step: {current_step}, Window size: {self.window_size}")
-        
-        # For each asset, extract its data
-        for i, asset in enumerate(self.asset_list):
-            # Get data for this asset
-            asset_data = data[data['ticker'] == asset].iloc[window]
-            
-            if len(asset_data) != self.window_size:
-                raise ValueError(f"Not enough data points for asset {asset}. Expected {self.window_size}, got {len(asset_data)}")
-            
-            # Process OHLCV data
-            for j, col in enumerate(self.ohlcv_cols):
-                ohlcv_data[i, j, :] = asset_data[col].values
-            
-        return ohlcv_data
+        data = processed_data[current_step - self.window_size:current_step, :, self.ohlcv_indices] # shape: (window_size, n_assets, ohlcv_dim)
+        return data.transpose(1, 0, 2) # shape: (n_assets, window_size, ohlcv_dim)
     
     def get_observation_space(self) -> Dict[str, Dict[str, Any]]:
         """

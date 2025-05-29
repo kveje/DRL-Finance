@@ -57,12 +57,10 @@ class MarketFrictionManager:
             price: Numpy array of shape (n_assets,) representing prices of the assets   
         Returns:
             Tuple[np.ndarray, np.ndarray]: Prices after applying all frictions and the cost of the frictions (commission, slippage)
-        """
-        new_price = np.copy(price)
-        
+        """   
         # Apply each friction in sequence
         for friction in self.frictions.values():
-            new_price = friction.apply(action, new_price)
+            new_price = friction.apply(action, price)
         
         return new_price, price - new_price 
     

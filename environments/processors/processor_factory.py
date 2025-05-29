@@ -27,6 +27,9 @@ class ProcessorFactory:
     @classmethod
     def create_processor(
         cls,
+        raw_data_feature_indices: Dict[str, int],
+        processed_data_feature_indices: Dict[str, int],
+        tech_col_indices: Dict[str, int],
         processor_type: str,
         **kwargs
     ) -> BaseProcessor:
@@ -44,7 +47,10 @@ class ProcessorFactory:
             raise ValueError(f"Unsupported processor type: {processor_type}")
             
         processor_class = cls._processors[processor_type]
-        return processor_class(**kwargs)
+        return processor_class(raw_data_feature_indices=raw_data_feature_indices, 
+                               processed_data_feature_indices=processed_data_feature_indices,
+                               tech_col_indices=tech_col_indices,
+                               **kwargs)
     
     @classmethod
     def register_processor(cls, name: str, processor_class: Type[BaseProcessor]) -> None:

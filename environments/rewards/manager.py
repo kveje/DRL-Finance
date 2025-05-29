@@ -3,7 +3,12 @@ from .sharpe import SharpeReward
 from .constraint_violation import ConstraintViolationReward
 from .log_returns import LogReturnsReward
 from .zero_action import ZeroActionReward
-
+from .projected_returns import ProjectedReturnsReward
+from .projected_sharpe import ProjectedSharpeReward
+from .projected_log_returns import ProjectedLogReturnsReward
+from .projected_max_drawdown import ProjectedMaxDrawdownReward
+from .max_drawdown import MaxDrawdownReward
+import pandas as pd
 from typing import Tuple, Dict, Any, List
 import numpy as np
 from collections import defaultdict
@@ -16,10 +21,15 @@ class RewardManager:
         "returns": ReturnsReward,
         "sharpe_based": SharpeReward,
         "constraint_violation": ConstraintViolationReward,
-        "zero_action": ZeroActionReward
+        "zero_action": ZeroActionReward,
+        "max_drawdown": MaxDrawdownReward,
+        "projected_returns": ProjectedReturnsReward,
+        "projected_sharpe": ProjectedSharpeReward,
+        "projected_log_returns": ProjectedLogReturnsReward,
+        "projected_max_drawdown": ProjectedMaxDrawdownReward,
     }
 
-    def __init__(self, reward_params: Dict[str, Any]):
+    def __init__(self, reward_params: Dict[str, Any], raw_data_feature_indices: Dict[str, int]):
         """
         Initialize the reward manager.
 
@@ -38,6 +48,7 @@ class RewardManager:
         self.reward_params = reward_params
         self.rewards = {}
         self.reward_history = defaultdict(list)  # Track individual reward components
+        self.raw_data_feature_indices = raw_data_feature_indices
         self._initialize_rewards()
 
     def _initialize_rewards(self):
@@ -54,6 +65,16 @@ class RewardManager:
                 self.rewards[reward_type] = ConstraintViolationReward(reward_params)
             elif reward_type == "zero_action":
                 self.rewards[reward_type] = ZeroActionReward(reward_params)
+            elif reward_type == "projected_returns":
+                self.rewards[reward_type] = ProjectedReturnsReward(reward_params, self.raw_data_feature_indices)
+            elif reward_type == "projected_sharpe":
+                self.rewards[reward_type] = ProjectedSharpeReward(reward_params, self.raw_data_feature_indices)
+            elif reward_type == "projected_log_returns":
+                self.rewards[reward_type] = ProjectedLogReturnsReward(reward_params, self.raw_data_feature_indices)
+            elif reward_type == "projected_max_drawdown":
+                self.rewards[reward_type] = ProjectedMaxDrawdownReward(reward_params, self.raw_data_feature_indices)
+            elif reward_type == "max_drawdown":
+                self.rewards[reward_type] = MaxDrawdownReward(reward_params, self.raw_data_feature_indices)
             else:
                 raise ValueError(f"Unknown reward type: {reward_type}")
 
@@ -63,6 +84,10 @@ class RewardManager:
         previous_portfolio_value: float,
         intended_action: np.ndarray = None,
         feasible_action: np.ndarray = None,
+        raw_data: np.ndarray = None,
+        current_day: int = None,
+        current_position: np.ndarray = None,
+        cash_balance: float = 0.0,
     ) -> Tuple[float, Dict[str, float]]:
         """
         Calculate the total reward and individual reward components.
@@ -96,6 +121,31 @@ class RewardManager:
             elif isinstance(reward, ZeroActionReward):
                 if feasible_action is not None and intended_action is not None:
                     reward_value = reward.calculate(intended_action, feasible_action)
+                else:
+                    reward_value = 0.0
+            elif isinstance(reward, ProjectedReturnsReward):
+                if raw_data is not None and current_day is not None and current_position is not None:
+                    reward_value = reward.calculate(raw_data, current_day, current_position, previous_portfolio_value, cash_balance)
+                else:
+                    reward_value = 0.0
+            elif isinstance(reward, ProjectedSharpeReward):
+                if raw_data is not None and current_day is not None and current_position is not None:
+                    reward_value = reward.calculate(raw_data, current_day, current_position, cash_balance)
+                else:
+                    reward_value = 0.0
+            elif isinstance(reward, ProjectedLogReturnsReward):
+                if raw_data is not None and current_day is not None and current_position is not None:
+                    reward_value = reward.calculate(raw_data, current_day, current_position, previous_portfolio_value, cash_balance)
+                else:
+                    reward_value = 0.0
+            elif isinstance(reward, MaxDrawdownReward):
+                if raw_data is not None and current_day is not None and current_position is not None:
+                    reward_value = reward.calculate(raw_data, current_day, current_position)
+                else:
+                    reward_value = 0.0
+            elif isinstance(reward, ProjectedMaxDrawdownReward):
+                if raw_data is not None and current_day is not None and current_position is not None:
+                    reward_value = reward.calculate(raw_data, current_day, current_position, cash_balance)
                 else:
                     reward_value = 0.0
             else:

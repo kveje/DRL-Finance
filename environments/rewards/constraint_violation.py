@@ -22,6 +22,7 @@ class ConstraintViolationReward(BaseReward):
         self,
         intended_action: np.ndarray,
         feasible_action: np.ndarray,
+        **kwargs
     ) -> float:
         """
         Calculate the penalty for constraint violations.

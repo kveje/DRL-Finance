@@ -13,7 +13,10 @@ class CompositeProcessor(BaseProcessor):
     
     def __init__(
         self,
-        processor_configs: List[Dict[str, Any]]
+        processor_configs: List[Dict[str, Any]],
+        raw_data_feature_indices: Dict[str, int],
+        processed_data_feature_indices: Dict[str, int],
+        tech_col_indices: Dict[str, int]
     ):
         """
         Initialize the composite processor.
@@ -32,39 +35,50 @@ class CompositeProcessor(BaseProcessor):
             kwargs = config.get('kwargs', {})
             
             # Create processor using factory
-            processor = ProcessorFactory.create_processor(processor_type, **kwargs)
+            processor = ProcessorFactory.create_processor(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices, processor_type,**kwargs)
             
             # Store processor and its configuration
             self.processors[processor_type] = processor
     
-    def process(self, data: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    def process(self, 
+                raw_data: np.ndarray, 
+                processed_data: np.ndarray, 
+                current_step: int, 
+                position: np.ndarray, 
+                cash: float) -> Dict[str, np.ndarray]:
         """
         Process the data using all registered processors.
         
         Args:
-            data: Dictionary containing the data for each processor.
+            raw_data: Dictionary containing the raw data for each processor.
+            processed_data: Dictionary containing the processed data for each processor.
             current_step: Current step in the environment
-                
+            position: Current position in the environment
+
         Returns:
             Dict[str, np.ndarray]: Dictionary containing processed data from each processor
         """
-        processed_data = {}
+        observation = {}
         
         for name, processor in self.processors.items():            
             # Process the data using the appropriate processor
             # Some processors need current_step, others don't
-            if name in ['price', 'ohlcv', 'tech', 'vix']:
-                processed_data[name] = processor.process(data['market'], data['step'])
-            elif name in ['affordability', 'current_price']:
-                processed_data[name] = processor.process(data['raw'], data['cash'], data['step'])
+            if name in ['price', 'ohlcv']:
+                observation[name] = processor.process(processed_data, current_step)
+            elif name in ['affordability']:
+                observation[name] = processor.process(raw_data, cash, current_step)
+            elif name in ['current_price']:
+                observation[name] = processor.process(raw_data, cash, current_step)
             elif name in ['cash']:
-                processed_data[name] = processor.process(data['cash'])
+                observation[name] = processor.process(cash)
             elif name in ['position']:
-                processed_data[name] = processor.process(data['position'])
+                observation[name] = processor.process(position)
+            elif name in ['tech']:
+                observation[name] = processor.process(processed_data, current_step)
             else:
                 raise ValueError(f"Processor {name} not found")
             
-        return processed_data
+        return observation
     
     def get_observation_space(self) -> Dict[str, spaces.Space]:
         """

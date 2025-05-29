@@ -12,21 +12,13 @@ class BaseReward(ABC):
     @abstractmethod
     def calculate(
         self,
-        portfolio_value: float,
-        previous_portfolio_value: float,
-        positions: np.ndarray,
-        price_changes: np.ndarray,
-        info: Dict[str, Any],
+        **kwargs
     ) -> float:
         """
         Calculate the reward for the current step.
 
         Args:
-            portfolio_value: Current portfolio value
-            previous_portfolio_value: Portfolio value from previous step
-            positions: Current positions in each asset
-            price_changes: Price changes for each asset
-            info: Additional information about the environment state
+            **kwargs: Arguments for the reward function
 
         Returns:
             float: The calculated reward

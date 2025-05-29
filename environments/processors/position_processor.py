@@ -14,7 +14,10 @@ class PositionProcessor(BaseProcessor):
     def __init__(
         self,
         position_limits: Dict[str, float],  # {'min': float, 'max': float}
-        asset_list: List[str] = []
+        asset_list: List[str] = [],
+        raw_data_feature_indices: Dict[str, int] = None,
+        processed_data_feature_indices: Dict[str, int] = None,
+        tech_col_indices: Dict[str, int] = None
     ):
         """
         Initialize the position processor.
@@ -23,6 +26,7 @@ class PositionProcessor(BaseProcessor):
             position_limits: Dictionary containing min and max position limits (in number of shares)
             asset_list: List of asset tickers to process
         """
+        super().__init__(raw_data_feature_indices, processed_data_feature_indices, tech_col_indices)
         self.position_limits = position_limits
         self.asset_list = asset_list
         self.n_assets = len(self.asset_list)
