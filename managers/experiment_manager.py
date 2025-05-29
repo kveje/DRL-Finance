@@ -18,11 +18,12 @@ from managers.backtest_manager import BacktestManager
 from utils.logger import Logger
 from models.agents.agent_factory import AgentFactory
 
-from managers.metrics_manager import MetricsManager, MetricCategory
+from managers.metrics_manager import MetricsManager
 from managers.checkpoint_manager import CheckpointManager
 from managers.visualization_manager import VisualizationManager
 from managers.config_manager import ConfigManager
 from managers.data_manager import ExperimentDataManager
+from managers.cloudstorage_manager import CloudStorageManager
 
 class ExperimentManager:
     """
@@ -47,6 +48,7 @@ class ExperimentManager:
         render_eval: bool = False,  # Whether to render evaluation environment
         base_dir: str = "experiments",  # Base directory for saving experiment data
         is_setup: bool = False,  # Whether this is a new experiment setup
+        gcs_bucket: Optional[str] = None,  # GCS bucket name
     ):
         """
         Initialize the experiment manager.
@@ -82,6 +84,7 @@ class ExperimentManager:
         self.render_train = render_train
         self.render_eval = render_eval
         self.is_setup = is_setup  # Store the setup flag
+        self.gcs_bucket = gcs_bucket
         
         # Create experiment directory
         self.experiment_dir = Path(base_dir) / experiment_name
@@ -154,8 +157,15 @@ class ExperimentManager:
             agent=self.agent,
             save_dir=str(backtest_dir),
             save_visualizations=True,
-            asset_names=self.train_env.processed_data["ticker"].unique().tolist()
+            asset_names=self.train_env.asset_list
         )
+
+        # Initialize cloud storage manager
+        self.cloud_storage_manager = CloudStorageManager(
+            bucket_name=self.gcs_bucket,
+            experiment_dir=self.experiment_dir,
+            logger=self.logger
+        ) if self.gcs_bucket else None
     
     def _save_initial_config(self):
         """Save initial experiment configuration."""
@@ -171,6 +181,7 @@ class ExperimentManager:
             early_stopping_metric=self.early_stopping_metric,
             render_train=self.render_train,
             render_eval=self.render_eval,
+            gcs_bucket=self.gcs_bucket,
             agent_type=self.agent.get_model_name(),
             train_env_params={
                 "n_assets": self.train_env.n_assets,
@@ -245,6 +256,9 @@ class ExperimentManager:
         self.start_time = time.time()
         self.logger.info(f"Starting training experiment: {self.experiment_name}")
         self.logger.info(f"Planning to train for up to {n_episodes} episodes")
+
+        if self.cloud_storage_manager:
+            self.cloud_storage_manager.start_periodic_uploads()
         
         if self.max_train_time:
             end_time = self.start_time + self.max_train_time
@@ -275,13 +289,6 @@ class ExperimentManager:
                     eval_metrics = self._run_evaluation()
                     self._check_early_stopping(eval_metrics)
                 
-                # Save model if needed
-                if (episode + 1) % self.save_interval == 0:
-                    self.checkpoint_manager.save_checkpoint(
-                        episode=episode,
-                        metrics=self.metrics_manager.get_latest_metrics()
-                    )
-                
                 # Save metrics if needed
                 if (episode + 1) % self.save_metric_interval == 0:
                     try:
@@ -290,11 +297,19 @@ class ExperimentManager:
                     except Exception as e:
                         self.logger.error(f"Error saving metrics: {str(e)}")
 
-                
+                # Save model if needed
+                if (episode + 1) % self.save_interval == 0:
+                    self.checkpoint_manager.save_checkpoint(
+                        episode=episode,
+                        metrics=self.metrics_manager.get_latest_metrics()
+                    )
+                    if self.cloud_storage_manager:
+                        self.cloud_storage_manager.upload_experiment_results()
+
                 # Check if we should stop early
-                if self.patience_counter >= self.early_stopping_patience:
-                    self.logger.info(f"Early stopping triggered after {episode + 1} episodes due to lack of improvement.")
-                    break
+                # if self.patience_counter >= self.early_stopping_patience:
+                #     self.logger.info(f"Early stopping triggered after {episode + 1} episodes due to lack of improvement.")
+                #     break
             
             # Training finished
             self.is_finished = True
@@ -310,6 +325,9 @@ class ExperimentManager:
             )
             self.metrics_manager.save()
             self.metrics_manager.plot()
+
+            if self.cloud_storage_manager:
+                self.cloud_storage_manager.stop_periodic_uploads()
             
             return self.metrics_manager.get_latest_metrics()
             
@@ -819,6 +837,7 @@ class ExperimentManager:
             render_eval=experiment_config.get("render_eval", False),
             base_dir=os.path.dirname(experiment_dir),
             is_setup=True,
+            gcs_bucket=experiment_config.get("gcs_bucket", None),
         )
         
         # Set the current episode to continue from where we left off

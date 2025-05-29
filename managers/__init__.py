@@ -4,5 +4,6 @@ from .backtest_manager import BacktestManager
 from .visualization_manager import VisualizationManager
 from .experiment_manager import ExperimentManager
 from .config_manager import ConfigManager
+from .cloudstorage_manager import CloudStorageManager
 
 __all__ = ['MetricsManager', 'CheckpointManager', 'BacktestManager', 'VisualizationManager', 'ExperimentManager', 'ConfigManager'] 

@@ -59,7 +59,8 @@ class ConfigManager:
         render_train: bool,
         render_eval: bool,
         agent_type: str,
-        train_env_params: Dict[str, Any]
+        train_env_params: Dict[str, Any],
+        gcs_bucket: str
     ) -> None:
         """Save experiment configuration."""
         config = {
@@ -74,7 +75,8 @@ class ConfigManager:
             "render_train": render_train,
             "render_eval": render_eval,
             "agent_type": agent_type,
-            "train_env_params": train_env_params
+            "train_env_params": train_env_params,
+            "gcs_bucket": gcs_bucket
         }
         
         self.configs["experiment"] = config

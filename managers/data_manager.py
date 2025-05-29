@@ -68,16 +68,16 @@ class ExperimentDataManager:
             "val_shape": val_data.shape,
             "train_columns": train_data.columns.tolist(),
             "val_columns": val_data.columns.tolist(),
-            "train_tickers": train_data["ticker"].unique().tolist(),
-            "val_tickers": val_data["ticker"].unique().tolist(),
-            "train_date_range": [
-                train_data["date"].min().strftime("%Y-%m-%d"),
-                train_data["date"].max().strftime("%Y-%m-%d")
-            ],
-            "val_date_range": [
-                val_data["date"].min().strftime("%Y-%m-%d"),
-                val_data["date"].max().strftime("%Y-%m-%d")
-            ],
+            # "train_tickers": train_data["ticker"].unique().tolist(),
+            # "val_tickers": val_data["ticker"].unique().tolist(),
+            # "train_date_range": [
+            #     train_data["date"].min().strftime("%Y-%m-%d"),
+            #     train_data["date"].max().strftime("%Y-%m-%d")
+            # ],
+            # "val_date_range": [
+            #     val_data["date"].min().strftime("%Y-%m-%d"),
+            #     val_data["date"].max().strftime("%Y-%m-%d")
+            # ],
             "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
@@ -156,20 +156,20 @@ class ExperimentDataManager:
             "train_data": {
                 "shape": train_data.shape,
                 "columns": train_data.columns.tolist(),
-                "tickers": train_data["ticker"].unique().tolist(),
-                "date_range": [
-                    train_data["date"].min().strftime("%Y-%m-%d"),
-                    train_data["date"].max().strftime("%Y-%m-%d")
-                ]
+                #"tickers": train_data["ticker"].unique().tolist(),
+                #"date_range": [
+                #    train_data["date"].min().strftime("%Y-%m-%d"),
+                #    train_data["date"].max().strftime("%Y-%m-%d")
+                #]
             },
             "val_data": {
                 "shape": val_data.shape,
                 "columns": val_data.columns.tolist(),
-                "tickers": val_data["ticker"].unique().tolist(),
-                "date_range": [
-                    val_data["date"].min().strftime("%Y-%m-%d"),
-                    val_data["date"].max().strftime("%Y-%m-%d")
-                ]
+                #"tickers": val_data["ticker"].unique().tolist(),
+                #"date_range": [
+                #    val_data["date"].min().strftime("%Y-%m-%d"),
+                #    val_data["date"].max().strftime("%Y-%m-%d")
+                #]
             },
             "columns_mapping": columns_mapping,
             "processor_params": processor_params or {},
