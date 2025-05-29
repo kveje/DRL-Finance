@@ -2,19 +2,13 @@
 # Each with Discrete interpreter, Price data, Parametric and Bayesian
 
 $agents = @("sac", "dqn", "ppo", "a2c")
-$network_types = @("parametric", "bayesian")
 
 $experiments = @()
 
 foreach ($agent in $agents) {
-    foreach ($net in $network_types) {
-        $exp_name = "${agent}_discrete_price_${net}"
-        $params = "--agent-type $agent --interpreter-type discrete --price-type price"
-        if ($net -eq "bayesian") {
-            $params += " --use-bayesian"
-        }
-        $experiments += @{name=$exp_name; params=$params}
-    }
+    $exp_name = "${agent}_test"
+    $params = "--agent-type $agent --interpreter-type discrete --price-type both --reward-projection-period 20 --indicator-type simple --reward-type log_returns"
+    $experiments += @{name=$exp_name; params=$params}
 }
 
 Write-Host "Setting up $($experiments.Count) experiments..." -ForegroundColor Green

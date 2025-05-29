@@ -27,7 +27,7 @@ from models.agents.agent_factory import AgentFactory
 def parse_args():
     parser = argparse.ArgumentParser(description="Start training a previously set up experiment")
     parser.add_argument("--experiment-name", type=str, required=True, help="Name of the experiment to train")
-    parser.add_argument("--n-episodes", type=int, default=1000000, help="Maximum number of episodes to train")
+    parser.add_argument("--n-episodes", type=int, default=1000, help="Maximum number of episodes to train")
     parser.add_argument("--max-train-time", type=int, default=86400, help="Maximum training time in seconds (24h default)")
     parser.add_argument("--experiments-dir", type=str, default="experiments", help="Directory containing experiments")
     

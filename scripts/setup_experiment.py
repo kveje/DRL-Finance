@@ -46,7 +46,7 @@ from config.models import (
     DQN_PARAMS,
     SAC_PARAMS,
 )
-from config.env import ENV_PARAMS, MARKET_FRIC_PARAMS, CONSTRAINT_PARAMS, REWARD_PARAMS, get_processor_config
+from config.env import ENV_PARAMS, MARKET_FRIC_PARAMS, CONSTRAINT_PARAMS, get_processor_config, get_reward_config
 from config.tickers import DOW_30_TICKER, NASDAQ_100_TICKER, SP_500_TICKER
 from config.interpreter import get_interpreter_config
 
@@ -86,6 +86,13 @@ def parse_args():
                         choices=["price", "ohlcv", "both"],
                         default="price",
                         help="Type of price data to use")
+    parser.add_argument("--reward-type", type=str,
+                        choices=["returns", "log_returns", "risk_adjusted"],
+                        default="return",
+                        help="Type of reward to use")
+    parser.add_argument("--reward-projection-period", type=int,
+                        default=0,
+                        help="Delay in reward calculation")
     
     return parser.parse_args()
 
@@ -171,14 +178,7 @@ def main():
     
     # Normalize data
     logger.info("Normalizing data...")
-    normalized_data = data_manager.normalize_data(
-        data=processed_data, 
-        method=NORMALIZATION_PARAMS["method"],
-        group_by = "ticker" if NORMALIZATION_PARAMS["group_by"] == "ticker" else None,
-        save_data=True,
-        handle_outliers=True,
-        fill_value=0
-    )
+    normalized_data = data_manager.simple_normalize_data(processed_data)
 
     # Split the data into training and validation sets
     logger.info("Splitting data into training and validation sets...")
@@ -276,6 +276,8 @@ def main():
     
     # Create environments
     logger.info("Creating training and validation environments...")
+
+    reward_params = get_reward_config(args.reward_type, None if args.reward_projection_period == 0 else args.reward_projection_period)
     train_env = TradingEnv(
         processed_data=normalized_train_data,
         raw_data=raw_train_data,
@@ -283,7 +285,7 @@ def main():
         env_params=ENV_PARAMS,
         friction_params=MARKET_FRIC_PARAMS,
         constraint_params=CONSTRAINT_PARAMS,
-        reward_params=REWARD_PARAMS,
+        reward_params=reward_params,
         render_mode=None,
         processor_configs=processor_config
     )
@@ -295,7 +297,7 @@ def main():
         env_params=ENV_PARAMS,
         friction_params=MARKET_FRIC_PARAMS,
         constraint_params=CONSTRAINT_PARAMS,
-        reward_params=REWARD_PARAMS,
+        reward_params=reward_params,
         render_mode=None,
         processor_configs=processor_config
     )
