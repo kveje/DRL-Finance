@@ -32,28 +32,77 @@ CONSTRAINT_PARAMS = {
 
 # Available reward types:
 REWARD_PARAMS = {
-    # "returns": {
-    #     "scale": 2
-    # },
+    "returns": {
+        "scale": 10
+    },
     "log_returns": {
         "scale": 10
     },
-    # "sharpe": {
-    #     "annual_risk_free_rate": 0.02,
-    #     "annualization_factor": 252,
-    #     "window_size": 20,
-    #     "min_history_size": 10,
-    #     "scale": 2
-    # },
+    "sharpe": {
+        "annual_risk_free_rate": 0.01,
+        "annualization_factor": 252,
+        "window_size": 20,
+        "min_history_size": 2,
+        "scale": 0.01
+    },
     "constraint_violation": {
-        "scale": 0.001
+        "scale": 0.01
     },
     "zero_action": {
-        "scale": 0.001,
+        "scale": 0.01,
         "window_size": 10,
         "min_consecutive_days": 5
+    },
+    "projected_log_returns": {
+        "projection_period": 20,
+        "scale": 5
+    },
+    "projected_returns": {
+        "projection_period": 20,
+        "scale": 5
+    },
+    "projected_sharpe": {
+        "projection_period": 20,
+        "scale": 0.01
+    },
+    "projected_max_drawdown": {
+        "projection_period": 20,
+        "scale": 0.5
+    },
+    "max_drawdown": {
+        "window_size": 20,
+        "scale": 0.5
     }
 }
+
+def get_reward_config(reward_config_str: str, projection_period: Optional[int] = 10) -> Dict:
+    """Get the reward config based on the reward config string."""
+    config = {}
+    if projection_period is not None:
+        if reward_config_str == "returns":
+            config["projected_returns"] = REWARD_PARAMS["projected_returns"]
+            config["projected_returns"]["projection_period"] = projection_period
+        elif reward_config_str == "log_returns":
+            config["projected_log_returns"] = REWARD_PARAMS["projected_log_returns"]
+            config["projected_log_returns"]["projection_period"] = projection_period
+        elif reward_config_str == "risk_adjusted":
+            config["projected_sharpe"] = REWARD_PARAMS["projected_sharpe"]
+            config["projected_max_drawdown"] = REWARD_PARAMS["projected_max_drawdown"]
+            config["projected_sharpe"]["projection_period"] = projection_period
+            config["projected_max_drawdown"]["projection_period"] = projection_period
+    else:
+        if reward_config_str == "returns":
+            config["returns"] = REWARD_PARAMS["returns"]
+        elif reward_config_str == "log_returns":
+            config["log_returns"] = REWARD_PARAMS["log_returns"]
+        elif reward_config_str == "risk_adjusted":
+            config["sharpe"] = REWARD_PARAMS["sharpe"]
+
+    # Add constraint violation and zero action
+    config["constraint_violation"] = REWARD_PARAMS["constraint_violation"]
+    config["zero_action"] = REWARD_PARAMS["zero_action"]
+
+    return config
 
 # Default configurations for all processors
 PROCESSOR_CONFIGS = {

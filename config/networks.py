@@ -17,9 +17,9 @@ BASE_CONFIG = {
             "hidden_dim": 128,
             "asset_embedding_dim": 16
         },
-        "technical": {
+        "tech": {
             "enabled": True,
-            "tech_dim": 20,  # SHOULD BE MODIFIED BY THE ACTUAL NUMBER OF TECHNICAL INDICATORS!!!
+            "tech_dim": 9,  # SHOULD BE MODIFIED BY THE ACTUAL NUMBER OF TECHNICAL INDICATORS!!!
             "hidden_dim": 64
         },
         "position": {
@@ -113,9 +113,9 @@ def get_network_config(
 
     # Adjust based on technical dimension
     if technical_dim is not None:
-        config["processors"]["technical"]["tech_dim"] = technical_dim
+        config["processors"]["tech"]["tech_dim"] = technical_dim
     else:
-        config["processors"]["technical"]["enabled"] = False
+        config["processors"]["tech"]["enabled"] = False
 
     # Configure heads
     if include_discrete:
